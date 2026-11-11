@@ -1,0 +1,327 @@
+import AppKit
+
+/// Plain-text view that keeps lines at a comfortable reading measure by centering the text column.
+final class LexMDTextView: NSTextView {
+    var maxLineWidth: CGFloat = 700 { didSet { updateInsets() } }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        var size = newSize
+        // Always match the visible width; autoresizing from a zero-sized start can overshoot.
+        if let width = enclosingScrollView?.contentSize.width, width > 0 { size.width = width }
+        super.setFrameSize(size)
+        updateInsets()
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        setFrameSize(frame.size)
+    }
+
+    func updateInsets() {
+        let horizontal = max(28, ((bounds.width - maxLineWidth) / 2).rounded())
+        let inset = NSSize(width: horizontal, height: 30)
+        if textContainerInset != inset { textContainerInset = inset }
+    }
+}
+
+@MainActor
+final class EditorController: NSObject, NSTextViewDelegate {
+    let scrollView: NSScrollView
+    let textView: LexMDTextView
+
+    var onTextChange: ((String) -> Void)?
+    var onScroll: ((CGFloat) -> Void)?
+    /// Returns true when it handled Escape.
+    var onCancel: (() -> Bool)?
+    private var hasFindHighlights = false
+
+    var fontSize: CGFloat = 14 {
+        didSet {
+            guard fontSize != oldValue else { return }
+            textView.maxLineWidth = fontSize * 0.6 * 84
+            textView.font = MarkdownHighlighter.font(size: fontSize)
+            highlight(full: true)
+        }
+    }
+
+    override init() {
+        scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = .textBackgroundColor
+
+        textView = LexMDTextView(frame: NSRect(x: 0, y: 0, width: 600, height: 800))
+        super.init()
+
+        textView.minSize = .zero
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: 600, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.lineFragmentPadding = 0
+
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.allowsUndo = true
+        textView.usesFindBar = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isAutomaticLinkDetectionEnabled = false
+        textView.smartInsertDeleteEnabled = false
+        textView.drawsBackground = true
+        textView.backgroundColor = .textBackgroundColor
+        textView.insertionPointColor = .controlAccentColor
+        textView.textColor = .labelColor
+        textView.font = MarkdownHighlighter.font(size: fontSize)
+        textView.maxLineWidth = fontSize * 0.6 * 84
+        textView.typingAttributes = MarkdownHighlighter.baseAttributes(size: fontSize)
+        textView.delegate = self
+
+        scrollView.documentView = textView
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(boundsDidChange(_:)),
+            name: NSView.boundsDidChangeNotification, object: scrollView.contentView
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(scrollerStyleDidChange(_:)),
+            name: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil
+        )
+    }
+
+    @objc private func scrollerStyleDidChange(_ notification: Notification) {
+        scrollView.scrollerStyle = .overlay
+    }
+
+    // MARK: Content
+
+    func load(_ text: String) {
+        textView.string = text
+        highlight(full: true)
+        textView.undoManager?.removeAllActions()
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+        let top = NSPoint(x: 0, y: -scrollView.contentInsets.top)
+        scrollView.contentView.scroll(to: top)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    func replaceText(_ text: String) {
+        let selection = textView.selectedRange()
+        let origin = scrollView.contentView.bounds.origin
+        textView.string = text
+        highlight(full: true)
+        let length = (text as NSString).length
+        textView.setSelectedRange(NSRange(location: min(selection.location, length), length: 0))
+        scrollView.contentView.scroll(to: origin)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    func moveCursorToEnd() {
+        let length = (textView.string as NSString).length
+        textView.setSelectedRange(NSRange(location: length, length: 0))
+        textView.scrollRangeToVisible(NSRange(location: length, length: 0))
+    }
+
+    func focus() {
+        textView.window?.makeFirstResponder(textView)
+    }
+
+    private var isFocused: Bool { textView.window?.firstResponder === textView }
+
+    // MARK: Find
+
+    private static let matchColor = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor.systemYellow.withAlphaComponent(0.28)
+            : NSColor.systemYellow.withAlphaComponent(0.38)
+    }
+    private static let currentMatchColor = NSColor.systemYellow.withAlphaComponent(0.85)
+
+    /// Paints every match with a temporary background (not part of the document's attributes).
+    func setFindHighlights(_ ranges: [NSRange], current: Int?) {
+        clearFindHighlights()
+        guard !ranges.isEmpty else { return }
+        for (index, range) in ranges.enumerated() {
+            let color = index == current ? Self.currentMatchColor : Self.matchColor
+            addHighlight(color, range)
+        }
+        hasFindHighlights = true
+    }
+
+    func clearFindHighlights() {
+        guard hasFindHighlights else { return }
+        hasFindHighlights = false
+        if let layoutManager = textView.textLayoutManager, let content = layoutManager.textContentManager {
+            layoutManager.removeRenderingAttribute(.backgroundColor, for: content.documentRange)
+        } else if let layoutManager = textView.layoutManager {
+            let full = NSRange(location: 0, length: (textView.string as NSString).length)
+            layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: full)
+        }
+    }
+
+    private func addHighlight(_ color: NSColor, _ range: NSRange) {
+        if let layoutManager = textView.textLayoutManager, let content = layoutManager.textContentManager {
+            guard let start = content.location(content.documentRange.location, offsetBy: range.location),
+                  let end = content.location(start, offsetBy: range.length),
+                  let textRange = NSTextRange(location: start, end: end) else { return }
+            layoutManager.addRenderingAttribute(.backgroundColor, value: color, for: textRange)
+        } else {
+            textView.layoutManager?.addTemporaryAttribute(.backgroundColor, value: color, forCharacterRange: range)
+        }
+    }
+
+    /// The selection when it is a short single line, for seeding search fields.
+    func selectedSingleLineText() -> String? {
+        let range = textView.selectedRange()
+        guard range.length > 0, range.length <= 200 else { return nil }
+        let text = (textView.string as NSString).substring(with: range)
+        return text.contains("\n") ? nil : text
+    }
+
+    /// Centers a range in the editor, optionally selecting it and flashing the find indicator.
+    func reveal(_ range: NSRange, indicator: Bool, select: Bool) {
+        let length = (textView.string as NSString).length
+        guard range.location <= length else { return }
+        let clamped = NSRange(location: range.location, length: min(range.length, length - range.location))
+        if select { textView.setSelectedRange(clamped) }
+        textView.scrollRangeToVisible(clamped)
+        if let window = textView.window {
+            let screenRect = textView.firstRect(forCharacterRange: clamped, actualRange: nil)
+            if screenRect != .zero {
+                let rect = textView.convert(window.convertFromScreen(screenRect), from: nil)
+                let clip = scrollView.contentView
+                let minY = -scrollView.contentInsets.top
+                let maxY = max(minY, textView.frame.height - clip.bounds.height)
+                let targetY = rect.midY - clip.bounds.height / 2
+                clip.scroll(to: NSPoint(x: 0, y: min(max(targetY, minY), maxY)))
+                scrollView.reflectScrolledClipView(clip)
+            }
+        }
+        if indicator, !scrollView.isHiddenOrHasHiddenAncestor {
+            textView.showFindIndicator(for: clamped)
+        }
+    }
+
+    func wrapSelection(_ prefix: String, _ suffix: String) {
+        guard isFocused else { return }
+        let range = textView.selectedRange()
+        let ns = textView.string as NSString
+        let selected = ns.substring(with: range)
+        let p = (prefix as NSString).length, s = (suffix as NSString).length
+        // Toggle off when the selection is already wrapped.
+        if range.location >= p, range.location + range.length + s <= ns.length,
+           ns.substring(with: NSRange(location: range.location - p, length: p)) == prefix,
+           ns.substring(with: NSRange(location: range.location + range.length, length: s)) == suffix {
+            let outer = NSRange(location: range.location - p, length: range.length + p + s)
+            textView.insertText(selected, replacementRange: outer)
+            textView.setSelectedRange(NSRange(location: outer.location, length: range.length))
+            return
+        }
+        textView.insertText(prefix + selected + suffix, replacementRange: range)
+        textView.setSelectedRange(NSRange(location: range.location + p, length: range.length))
+    }
+
+    func insertLink() {
+        guard isFocused else { return }
+        let range = textView.selectedRange()
+        let selected = (textView.string as NSString).substring(with: range)
+        let label = selected.isEmpty ? "link" : selected
+        textView.insertText("[\(label)](url)", replacementRange: range)
+        let urlStart = range.location + (label as NSString).length + 3
+        textView.setSelectedRange(NSRange(location: urlStart, length: 3))
+    }
+
+    // MARK: Delegate
+
+    func textDidChange(_ notification: Notification) {
+        highlight(full: false)
+        onTextChange?(textView.string)
+    }
+
+    func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if selector == #selector(NSResponder.insertNewline(_:)) {
+            return continueList()
+        }
+        if selector == #selector(NSResponder.cancelOperation(_:)), onCancel?() == true {
+            return true
+        }
+        return false
+    }
+
+    private static let listPrefix = try! NSRegularExpression(
+        pattern: #"^([ \t]*)(?:([-*+])|(\d+)([.)]))([ \t]+)(\[[ xX]\][ \t]+)?"#
+    )
+    private static let quotePrefix = try! NSRegularExpression(pattern: #"^([ \t]*>[ \t]?)+"#)
+
+    /// Continues Markdown lists and quotes when pressing Return; an empty item ends the list.
+    private func continueList() -> Bool {
+        let selection = textView.selectedRange()
+        guard selection.length == 0, !textView.hasMarkedText() else { return false }
+        let ns = textView.string as NSString
+        let line = ns.lineRange(for: NSRange(location: selection.location, length: 0))
+        let headRange = NSRange(location: line.location, length: selection.location - line.location)
+        let head = ns.substring(with: headRange)
+        let headNS = head as NSString
+        let all = NSRange(location: 0, length: headNS.length)
+
+        var continuation: String?
+        var markerLength = 0
+        if let m = Self.listPrefix.firstMatch(in: head, range: all) {
+            markerLength = m.range.length
+            let indent = headNS.substring(with: m.range(at: 1))
+            let spacing = headNS.substring(with: m.range(at: 5))
+            let task = m.range(at: 6).location != NSNotFound ? "[ ] " : ""
+            if m.range(at: 2).location != NSNotFound {
+                continuation = indent + headNS.substring(with: m.range(at: 2)) + spacing + task
+            } else {
+                let number = Int(headNS.substring(with: m.range(at: 3))) ?? 0
+                continuation = indent + "\(number + 1)" + headNS.substring(with: m.range(at: 4)) + spacing + task
+            }
+        } else if let m = Self.quotePrefix.firstMatch(in: head, range: all) {
+            markerLength = m.range.length
+            continuation = headNS.substring(with: m.range)
+        }
+        guard let continuation else { return false }
+
+        let restOfLine = ns.substring(with: NSRange(location: selection.location, length: NSMaxRange(line) - selection.location))
+        if markerLength == headNS.length, restOfLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // Empty item: remove the marker instead of continuing.
+            textView.insertText("", replacementRange: headRange)
+            return true
+        }
+        textView.insertText("\n" + continuation, replacementRange: selection)
+        return true
+    }
+
+    @objc private func boundsDidChange(_ notification: Notification) {
+        guard let document = scrollView.documentView else { return }
+        let clip = scrollView.contentView.bounds
+        let insets = scrollView.contentInsets
+        let maxY = document.frame.height + insets.top + insets.bottom - clip.height
+        let fraction = maxY > 1 ? (clip.origin.y + insets.top) / maxY : 0
+        onScroll?(min(max(fraction, 0), 1))
+    }
+
+    private func highlight(full: Bool) {
+        guard let storage = textView.textStorage, !textView.hasMarkedText() else { return }
+        let length = storage.length
+        var range: NSRange?
+        if !full, length > 120_000 {
+            let ns = storage.string as NSString
+            let sel = textView.selectedRange()
+            let start = max(0, sel.location - 3000)
+            let end = min(length, NSMaxRange(sel) + 3000)
+            range = ns.paragraphRange(for: NSRange(location: start, length: end - start))
+        }
+        MarkdownHighlighter.highlight(storage, size: fontSize, in: range)
+        textView.typingAttributes = MarkdownHighlighter.baseAttributes(size: fontSize)
+    }
+}
