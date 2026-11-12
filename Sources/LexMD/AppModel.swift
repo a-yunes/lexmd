@@ -389,6 +389,9 @@ final class AppModel {
             watcher = DirectoryWatcher(path: root) { [weak self] events in
                 MainActor.assumeIsolated { self?.handleFileEvents(events) }
             }
+        } else {
+            // Opening the same folder again rescans it.
+            outline.index.refresh()
         }
         rescan()
     }
@@ -573,7 +576,7 @@ final class AppModel {
 
     func saveNow() {
         saveTask?.cancel()
-        guard let url = currentFile, text != savedText else { return }
+        guard let url = currentFile, text != savedText, !sidebarFiles.isTrashing(url.path) else { return }
         do {
             // Write in place so file watchers see a modification rather than a replace.
             try text.write(to: url, atomically: false, encoding: .utf8)

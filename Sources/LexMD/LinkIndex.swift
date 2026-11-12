@@ -235,7 +235,7 @@ final class LinkIndex {
     /// Called with the previous snapshot after each update.
     @ObservationIgnored var onUpdate: ((LinkIndexSnapshot) -> Void)?
 
-    @ObservationIgnored private var root: String?
+    @ObservationIgnored private(set) var root: String?
     @ObservationIgnored private var needsFullScan = false
     @ObservationIgnored private var pendingPaths: Set<String> = []
     @ObservationIgnored private var task: Task<Void, Never>?

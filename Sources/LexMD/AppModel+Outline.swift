@@ -195,8 +195,11 @@ extension AppModel {
 
     // MARK: Index upkeep
 
+    /// Follows the project folder. Changes inside it reach the index as file events, and file
+    /// commands refresh it themselves, so a new sidebar tree alone does not rescan the project.
     func linksTreeDidChange() {
-        outline.index.setRoot(rootURL?.path)
+        let root = rootURL?.path
+        if outline.index.root != root { outline.index.setRoot(root) }
     }
 
     /// Re-reads changed documents and images; folder changes rescan the whole project.

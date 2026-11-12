@@ -249,6 +249,21 @@ struct LinkUpdaterTests {
         #expect(try String(contentsOfFile: root + "/index.md", encoding: .utf8) == "Start at [guide](moved/new.md) and [[new]].\r\n")
     }
 
+    @Test func rewritingASymlinkedDocumentKeepsTheLink() throws {
+        let folder = try TestFolder()
+        let root = FileScanner.canonicalPath(folder.url.path)
+        try FileManager.default.createDirectory(atPath: root + "/shared", withIntermediateDirectories: true)
+        try folder.write("shared/notes.md", "[x](../old.md)\n")
+        try FileManager.default.createSymbolicLink(atPath: root + "/notes.md", withDestinationPath: "shared/notes.md")
+        var file = try #require(TextFile.read(URL(fileURLWithPath: root + "/notes.md")))
+        file.text = "[x](new.md)\n"
+        try file.write(to: URL(fileURLWithPath: root + "/notes.md"))
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: root + "/notes.md") == "shared/notes.md")
+        #expect(try String(contentsOfFile: root + "/shared/notes.md", encoding: .utf8) == "[x](new.md)\n")
+        #expect(LinkUpdater.restore([RewrittenFile(path: root + "/notes.md", before: "[x](../old.md)\n", after: "[x](new.md)\n")], forward: false).isEmpty)
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: root + "/notes.md") == "shared/notes.md")
+    }
+
     @Test func planUsesUnsavedTextOfOpenDocuments() throws {
         let folder = try TestFolder()
         let root = FileScanner.canonicalPath(folder.url.path)
