@@ -83,6 +83,23 @@ final class AppModel {
         }
     }
 
+    // Editor features; see AppModel+Editor.swift.
+    var imageFolder = "assets" {
+        didSet { defaults.set(imageFolder, forKey: Keys.imageFolder) }
+    }
+    var checksSpelling = true {
+        didSet { defaults.set(checksSpelling, forKey: Keys.checksSpelling); applyEditorSettings() }
+    }
+    var checksGrammar = false {
+        didSet { defaults.set(checksGrammar, forKey: Keys.checksGrammar); applyEditorSettings() }
+    }
+    var focusMode = false {
+        didSet { defaults.set(focusMode, forKey: Keys.focusMode); applyEditorSettings() }
+    }
+    var typewriterScrolling = false {
+        didSet { defaults.set(typewriterScrolling, forKey: Keys.typewriterScrolling); applyEditorSettings() }
+    }
+
     // In-document find (preview find bar; the editor uses the native find bar)
     var isFindBarVisible = false
     var findQuery = "" {
@@ -143,6 +160,11 @@ final class AppModel {
         static let onboardingComplete = "onboardingComplete"
         static let recentFiles = "recentFiles"
         static let loadsRemoteContent = "loadsRemoteContent"
+        static let imageFolder = "imageFolder"
+        static let checksSpelling = "checksSpelling"
+        static let checksGrammar = "checksGrammar"
+        static let focusMode = "focusMode"
+        static let typewriterScrolling = "typewriterScrolling"
     }
 
     private init() {
@@ -156,6 +178,12 @@ final class AppModel {
         recentFiles = defaults.stringArray(forKey: Keys.recentFiles) ?? []
         sidebarPosition = SidebarPosition(rawValue: defaults.string(forKey: Keys.sidebarPosition) ?? "") ?? .left
         appearanceMode = AppearanceMode(rawValue: defaults.string(forKey: Keys.appearance) ?? "") ?? .system
+        imageFolder = defaults.string(forKey: Keys.imageFolder) ?? "assets"
+        checksSpelling = defaults.object(forKey: Keys.checksSpelling) as? Bool ?? true
+        checksGrammar = defaults.bool(forKey: Keys.checksGrammar)
+        focusMode = defaults.bool(forKey: Keys.focusMode)
+        typewriterScrolling = defaults.bool(forKey: Keys.typewriterScrolling)
+        configureEditorFeatures()
 
         editor.onTextChange = { [weak self] newText in self?.textDidChange(newText) }
         editor.onCancel = { [weak self] in
