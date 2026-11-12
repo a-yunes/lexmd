@@ -13,7 +13,7 @@ enum LexMDIntentError: Error, CustomLocalizedStringResourceConvertible {
     var localizedStringResource: LocalizedStringResource {
         switch self {
         case .notOnDisk: "LexMD can only open files and folders on this Mac."
-        case .noProject: "Open a project in LexMD, or choose a folder for the note."
+        case .noProject: "Open a project in LexMD, or choose a folder for the document."
         case .notAFolder(let path): "\(path) is not a folder."
         case .noDocument: "No document is open in LexMD."
         }
@@ -22,7 +22,7 @@ enum LexMDIntentError: Error, CustomLocalizedStringResourceConvertible {
 
 struct OpenInLexMDIntent: AppIntent {
     static let title: LocalizedStringResource = "Open in LexMD"
-    static let description = IntentDescription("Opens Markdown files in tabs, or a folder as the project.")
+    static let description = IntentDescription("Opens Markdown documents in tabs, or a folder as the project.")
     static let openAppWhenRun = true
 
     @Parameter(title: "Files or Folder", supportedContentTypes: [.folder, .text])
@@ -41,10 +41,12 @@ struct OpenInLexMDIntent: AppIntent {
     }
 }
 
+/// The Create Document action. The type keeps its original name, which identifies the action in
+/// shortcuts people have already built.
 struct CreateNoteIntent: AppIntent {
-    static let title: LocalizedStringResource = "Create Note"
+    static let title: LocalizedStringResource = "Create Document"
     static let description = IntentDescription(
-        "Creates a Markdown note in a folder or the open project and opens it. Existing files are never replaced; a number is added to the name instead."
+        "Creates a Markdown document in a folder or the open project and opens it. Existing files are never replaced; a number is added to the name instead."
     )
     static let openAppWhenRun = true
 
@@ -54,11 +56,11 @@ struct CreateNoteIntent: AppIntent {
     @Parameter(title: "Text", default: "", inputOptions: String.IntentInputOptions(multiline: true))
     var text: String
 
-    @Parameter(title: "Folder", description: "Without a folder, the note goes in the project open in LexMD.", supportedContentTypes: [.folder])
+    @Parameter(title: "Folder", description: "Without a folder, the document goes in the project open in LexMD.", supportedContentTypes: [.folder])
     var folder: IntentFile?
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Create note \(\.$name) with \(\.$text)") {
+        Summary("Create document \(\.$name) with \(\.$text)") {
             \.$folder
         }
     }
@@ -134,8 +136,8 @@ struct LexMDShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
             intent: CreateNoteIntent(),
-            phrases: ["Create a note in \(.applicationName)", "New \(.applicationName) note"],
-            shortTitle: "Create Note",
+            phrases: ["Create a document in \(.applicationName)", "New \(.applicationName) document"],
+            shortTitle: "Create Document",
             systemImageName: "square.and.pencil"
         )
         AppShortcut(
@@ -147,7 +149,7 @@ struct LexMDShortcuts: AppShortcutsProvider {
     }
 }
 
-/// Creates Markdown notes for the Create Note action.
+/// Creates Markdown documents for the Create Document action.
 enum NoteCreator {
     /// A safe file name: no folder separators, not hidden, with a Markdown extension.
     static func fileName(for rawName: String) -> (base: String, extension: String) {
@@ -163,7 +165,7 @@ enum NoteCreator {
         return (name, "md")
     }
 
-    /// Writes a new note in `folder`, numbering the name when it is taken. Never replaces a file.
+    /// Writes a new document in `folder`, numbering the name when it is taken. Never replaces a file.
     static func create(name rawName: String, text: String, in folder: URL) throws -> URL {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue else {

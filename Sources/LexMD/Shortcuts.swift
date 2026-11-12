@@ -154,7 +154,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .open: "Open…"
         case .quickOpen: "Open Quickly…"
-        case .newDocument: "New Document…"
+        case .newDocument: "New Document"
         case .save: "Save"
         case .revealInFinder: "Reveal in Finder"
         case .toggleSidebar: "Show/Hide Sidebar"

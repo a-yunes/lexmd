@@ -35,6 +35,7 @@ struct OnboardingView: View {
                 Text(subtitle)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .frame(maxWidth: 360)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .accessibilityElement(children: .combine)
@@ -81,9 +82,9 @@ struct OnboardingView: View {
 
     private var subtitle: String {
         switch step {
-        case .welcome: "Welcome to LexMD. See all of a project’s Markdown\nin one place, then read and update it."
-        case .folder: "Pick a repository or folder.\nLexMD shows only its Markdown files."
-        case .finish: "A few choices to start with.\nChange any of them later in Settings."
+        case .welcome: "Welcome to LexMD. See all of a project’s Markdown documents in one place, then read and update them."
+        case .folder: "Pick a project folder. LexMD shows only its Markdown documents."
+        case .finish: "A few choices to start with. Change any of them later in Settings."
         }
     }
 
@@ -129,7 +130,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Open Markdown files with LexMD")
+                        Text("Open Markdown documents with LexMD")
                         Text("Double-click any .md file in Finder.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -187,9 +188,8 @@ struct OnboardingView: View {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.prompt = "Choose"
-        panel.message = "Choose a repository or folder to read its Markdown."
-        guard let window = NSApp.keyWindow else { return }
-        panel.beginSheetModal(for: window) { response in
+        panel.message = "Choose a project folder to read its Markdown documents."
+        model.present(panel) { response in
             if response == .OK, let url = panel.url { model.open(url) }
         }
     }
