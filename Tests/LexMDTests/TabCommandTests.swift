@@ -18,12 +18,19 @@ struct TabCommandTests {
 
         model.open(URL(fileURLWithPath: path("a.md")))
         #expect(model.tabStore.list.count == 1)
-        #expect(model.showsTabBar, "the tab bar shows by default, even with one document")
+        let alwaysShow = model.tabStore.alwaysShowTabBar
+        defer { model.tabStore.alwaysShowTabBar = alwaysShow }
+        model.tabStore.alwaysShowTabBar = false
+        #expect(!model.showsTabBar, "a single document shows no tab bar")
+        model.tabStore.alwaysShowTabBar = true
+        #expect(model.showsTabBar, "unless Always show tab bar is on")
+        model.tabStore.alwaysShowTabBar = false
 
         // Sidebar: Open in New Tab.
         model.openInNewTab(path("b.md"))
         #expect(model.tabStore.list.tabs.map(\.path) == [path("a.md"), path("b.md")])
         #expect(model.currentFile?.path == path("b.md"))
+        #expect(model.showsTabBar, "two documents show the tab bar")
 
         // New Tab: Open Quickly, then the picked file opens in another tab.
         model.newTab()

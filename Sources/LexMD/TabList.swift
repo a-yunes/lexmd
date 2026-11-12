@@ -193,6 +193,6 @@ final class TabStore {
     @ObservationIgnored var references: [UUID: Data] = [:]
 
     init() {
-        alwaysShowTabBar = UserDefaults.standard.object(forKey: AppModel.Keys.alwaysShowTabBar) as? Bool ?? true
+        alwaysShowTabBar = UserDefaults.standard.bool(forKey: AppModel.Keys.alwaysShowTabBar)
     }
 }
