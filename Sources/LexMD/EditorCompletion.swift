@@ -102,10 +102,13 @@ final class EditorCompletion: NSObject {
         return true
     }
 
+    /// The storage's own string; bridging `textView.string` would copy the document on every keystroke.
+    private var currentText: NSString { textView.textStorage?.mutableString ?? textView.string as NSString }
+
     private func update(allowOpening: Bool) {
         let selection = textView.selectedRange()
         guard isEnabled(), !textView.hasMarkedText(), selection.length == 0,
-              let next = Self.context(in: textView.string as NSString, caret: selection.location) else {
+              let next = Self.context(in: currentText, caret: selection.location) else {
             close()
             return
         }
@@ -147,7 +150,7 @@ final class EditorCompletion: NSObject {
     func accept(_ index: Int) {
         guard let context, list.items.indices.contains(index) else { return }
         let item = list.items[index]
-        let ns = textView.string as NSString
+        let ns = currentText
         var insertion = item.insertion
         var caretAfter = 0
         switch context.kind {
@@ -163,11 +166,11 @@ final class EditorCompletion: NSObject {
         isAccepting = false
         if caretAfter > 0 {
             let caret = textView.selectedRange().location + caretAfter
-            textView.setSelectedRange(NSRange(location: min(caret, (textView.string as NSString).length), length: 0))
+            textView.setSelectedRange(NSRange(location: min(caret, currentText.length), length: 0))
         }
         close()
         let caret = textView.selectedRange().location
-        acceptedContext = Self.context(in: textView.string as NSString, caret: caret)
+        acceptedContext = Self.context(in: currentText, caret: caret)
     }
 
     // MARK: Context
@@ -230,16 +233,29 @@ final class EditorCompletion: NSObject {
         return false
     }
 
-    /// Whether a line starting at `location` is inside a fenced code block.
+    /// Whether a line starting at `location` is inside a fenced code block. Runs on keystrokes in
+    /// link targets, so it visits only the lines holding three backticks or tildes, not every line.
     static func isInFencedCode(_ text: NSString, before location: Int) -> Bool {
-        guard location > 0, text.range(of: "```").location != NSNotFound || text.range(of: "~~~").location != NSNotFound else { return false }
+        let length = min(location, text.length)
         var fence: (char: Character, count: Int)?
-        text.enumerateSubstrings(in: NSRange(location: 0, length: location), options: .byLines) { line, _, _, _ in
-            guard let line else { return }
+        var searchStart = 0
+        // The next run of each kind at or after `searchStart` (NSNotFound when there is none).
+        var next = (tick: -1, tilde: -1)
+        func find(_ run: String, cached: Int) -> Int {
+            guard cached != NSNotFound, cached < searchStart else { return cached }
+            return text.range(of: run, range: NSRange(location: searchStart, length: length - searchStart)).location
+        }
+        while searchStart < length {
+            next = (find("```", cached: next.tick), find("~~~", cached: next.tilde))
+            let hit = min(next.tick, next.tilde)
+            guard hit != NSNotFound else { break }
+            let lineRange = text.lineRange(for: NSRange(location: hit, length: 0))
+            searchStart = NSMaxRange(lineRange)
+            let line = text.substring(with: lineRange).trimmingCharacters(in: .newlines)
             let trimmed = line.drop { $0 == " " }
-            guard line.count - trimmed.count < 4, let first = trimmed.first, first == "`" || first == "~" else { return }
+            guard line.count - trimmed.count < 4, let first = trimmed.first, first == "`" || first == "~" else { continue }
             let run = trimmed.prefix { $0 == first }.count
-            guard run >= 3 else { return }
+            guard run >= 3 else { continue }
             if let open = fence {
                 if first == open.char, run >= open.count, trimmed.dropFirst(run).allSatisfy(\.isWhitespace) { fence = nil }
             } else {
@@ -254,11 +270,21 @@ final class EditorCompletion: NSObject {
     struct Candidate {
         var item: CompletionItem
         /// Texts the query is matched against, for example the file name and its path.
-        var keys: [String]
+        let keys: [String]
         /// Lower groups come first among equally good matches (Markdown before images).
-        var group: Int = 0
+        var group: Int
         /// Breaks ties when the query is empty; higher is better.
-        var weight: Int = 0
+        var weight: Int
+        /// `keys` lowercased, prepared once so ranking a cached list on each keystroke stays cheap.
+        let folded: [[Character]]
+
+        init(item: CompletionItem, keys: [String], group: Int = 0, weight: Int = 0) {
+            self.item = item
+            self.keys = keys
+            self.group = group
+            self.weight = weight
+            folded = keys.map { Array($0.lowercased()) }
+        }
     }
 
     /// Fuzzy-ranks candidates: prefix matches, then substring matches, then scattered letters.
@@ -267,8 +293,8 @@ final class EditorCompletion: NSObject {
         var scored: [(tier: Int, group: Int, score: Int, title: String, item: CompletionItem)] = []
         for candidate in candidates {
             var best: (tier: Int, score: Int)?
-            for key in candidate.keys {
-                guard let match = score(q, Array(key.lowercased())) else { continue }
+            for key in candidate.folded {
+                guard let match = score(q, key) else { continue }
                 if best == nil || (match.tier, match.score) > (best!.tier, best!.score) { best = match }
             }
             guard let best else { continue }
@@ -342,7 +368,8 @@ final class EditorCompletion: NSObject {
     private func positionPanel() {
         guard let panel, panel.parent != nil, let context else { return }
         let caret = textView.firstRect(forCharacterRange: NSRange(location: context.range.location, length: 0), actualRange: nil)
-        guard caret != .zero else { hidePanel(); return }
+        // Without a place to show the list, close it: a hidden list must not take Return or arrows.
+        guard caret != .zero else { close(); return }
         let rows = CGFloat(min(list.items.count, 8))
         let size = NSSize(width: 380, height: rows * CompletionListView.rowHeight + 10)
         var origin = NSPoint(x: caret.minX - 30, y: caret.minY - size.height - 4)

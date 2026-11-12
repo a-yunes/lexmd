@@ -71,6 +71,68 @@ struct EditorHighlightTests {
         #expect(Self.matchesFullHighlight(editor))
     }
 
+    /// Several storage edits before one change notification, as while an input method composes
+    /// text or a command replaces several ranges, restyle the span covering all of them.
+    @Test(arguments: [11, 12, 13, 14])
+    func batchedEditsMatchFullHighlight(seed: UInt64) throws {
+        let editor = EditorController()
+        editor.load(Self.sample)
+        let storage = editor.textView.textStorage!
+        var random = SeededRandom(seed: seed)
+        for step in 0..<300 {
+            for _ in 0..<Int.random(in: 1...3, using: &random) {
+                let length = storage.length
+                let location = Int.random(in: 0...length, using: &random)
+                let deleting = Int.random(in: 0...2, using: &random) == 0
+                let range = NSRange(location: location, length: deleting ? min(Int.random(in: 1...6, using: &random), length - location) : 0)
+                storage.replaceCharacters(in: range, with: deleting ? "" : Self.snippets.randomElement(using: &random)!)
+            }
+            editor.textView.didChangeText()
+            try #require(Self.matchesFullHighlight(editor), "seed \(seed), step \(step)")
+        }
+    }
+
+    @Test func composedTextRestylesOnlyItsParagraph() {
+        let editor = EditorController()
+        editor.load(String(repeating: "Plain paragraph with **bold** text.\n\n", count: 4000))
+        let storage = editor.textView.textStorage!
+        var edited: [NSRange] = []
+        let observer = NotificationCenter.default.addObserver(
+            forName: NSTextStorage.didProcessEditingNotification, object: storage, queue: nil
+        ) { note in
+            MainActor.assumeIsolated {
+                guard let storage = note.object as? NSTextStorage else { return }
+                if storage.editedMask == .editedAttributes { edited.append(storage.editedRange) }
+            }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        // Each keystroke of a composition replaces the text composed so far.
+        storage.replaceCharacters(in: NSRange(location: 10, length: 0), with: "k")
+        storage.replaceCharacters(in: NSRange(location: 10, length: 1), with: "ka")
+        storage.replaceCharacters(in: NSRange(location: 12, length: 0), with: "n")
+        editor.textView.didChangeText()
+        let restyled = edited.map(\.length).max() ?? 0
+        #expect(restyled > 0 && restyled < 200, "restyled \(restyled) of \(storage.length) characters")
+        #expect(Self.matchesFullHighlight(editor))
+    }
+
+    @Test func editUnionsFollowLaterEdits() {
+        func union(_ pending: (Int, Int), old: (Int, Int), edited: (Int, Int)) -> NSRange {
+            EditorController.union(
+                NSRange(location: pending.0, length: pending.1),
+                movedBy: NSRange(location: old.0, length: old.1), edited: NSRange(location: edited.0, length: edited.1)
+            )
+        }
+        // A later insertion before the pending edit moves it.
+        #expect(union((10, 2), old: (0, 0), edited: (0, 3)) == NSRange(location: 0, length: 15))
+        // A later edit after it extends the span.
+        #expect(union((10, 2), old: (20, 1), edited: (20, 0)) == NSRange(location: 10, length: 10))
+        // A later edit replacing part of it.
+        #expect(union((10, 4), old: (12, 4), edited: (12, 1)) == NSRange(location: 10, length: 3))
+        // Typing at the end of a pending edit.
+        #expect(union((10, 1), old: (11, 0), edited: (11, 1)) == NSRange(location: 10, length: 2))
+    }
+
     private static func matchesFullHighlight(_ editor: EditorController) -> Bool {
         let storage = editor.textView.textStorage!
         let reference = NSTextStorage(string: storage.string)

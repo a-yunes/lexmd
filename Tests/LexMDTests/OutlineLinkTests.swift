@@ -403,6 +403,12 @@ struct OutlineLinkTests {
         #expect(context("```\n[[x") == nil)
         #expect(context("```\ncode\n```\n[[x")?.kind == .wiki)
         #expect(context("[[a]] then [b](")?.kind == .path(image: false))
+        #expect(context("~~~\n```\n~~~\n[[x")?.kind == .wiki)
+        #expect(context("````\n```\n[[x") == nil)
+        #expect(context("````\n```\n`````\n[[x")?.kind == .wiki)
+        #expect(context("    ```\n[[x")?.kind == .wiki)
+        #expect(context("a ``` b\n[[x")?.kind == .wiki)
+        #expect(context("~~~\n[[x") == nil)
         #expect(context("plain text") == nil)
     }
 
@@ -431,6 +437,29 @@ struct OutlineLinkTests {
         // An empty query keeps every candidate, nearest (highest weight) first.
         #expect(titles("") == ["Roadmap.md", "Guide.md", "Glossary.md", "big-guide.md", "Getting Started.md", "guide.png"])
         #expect(EditorCompletion.rank("", candidates, limit: 2).count == 2)
+    }
+
+    @Test func completionCandidatesAreBuiltOncePerProjectVersion() {
+        let outline = OutlineModel()
+        var builds = 0
+        func candidates(_ key: OutlineModel.CandidateKey) -> [String] {
+            outline.candidates(for: key) {
+                builds += 1
+                return [EditorCompletion.Candidate(item: CompletionItem(id: "a", kind: .document, title: "A", insertion: "a"), keys: ["A"])]
+            }.map(\.item.id)
+        }
+        let key = OutlineModel.CandidateKey(kind: .path(image: false), structureVersion: 1, document: "/p/a.md", root: "/p")
+        #expect(candidates(key) == ["a"])
+        #expect(candidates(key) == ["a"])
+        #expect(builds == 1)
+        var changed = key
+        changed.structureVersion = 2
+        _ = candidates(changed)
+        changed.kind = .path(image: true)
+        _ = candidates(changed)
+        changed.document = "/p/b.md"
+        _ = candidates(changed)
+        #expect(builds == 4)
     }
 
     @Test func returnContinuesListsUnlessSuggestionsShow() {
