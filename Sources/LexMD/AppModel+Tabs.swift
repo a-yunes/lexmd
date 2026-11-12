@@ -24,6 +24,10 @@ extension AppModel {
     /// After `load`: the active tab now shows this document.
     func tabDidLoad(_ url: URL) {
         tabStore.list.replaceActive(with: url.path)
+        if let id = tabStore.list.activeID {
+            rememberFile(of: id)
+            if tabStore.missing.contains(id) { tabStore.missing.remove(id) }
+        }
         persistTabs()
     }
 
@@ -66,6 +70,8 @@ extension AppModel {
         // Other tabs may hold text that could not be saved before; try once more before they close.
         saveAllTabs()
         tabStore.list.removeAll()
+        tabStore.references = [:]
+        tabStore.missing = []
         closeDocument()
     }
 
@@ -84,6 +90,7 @@ extension AppModel {
         for path in restored.paths { list.insert(DocumentTab(path: path), at: list.count) }
         list.activate(list.tabs[restored.active].id)
         tabStore.list = list
+        for tab in list.tabs { rememberFile(of: tab.id) }
         showActiveTab()
         return currentFile != nil
     }
@@ -415,8 +422,25 @@ extension EditorController {
             textView.didChangeText()
             applied = true
         }
-        if applied { textView.undoManager?.setActionName(actionName) }
+        if applied {
+            textView.undoManager?.setActionName(actionName)
+            registerTextChangeOnUndo()
+        }
         textView.breakUndoCoalescing()
         return applied
+    }
+
+    /// Undoing or redoing edits made through the text storage does not report the change to
+    /// the delegate, so the model would keep (and autosave) the text from before the undo. This
+    /// reports it once the undo or redo has run.
+    private func registerTextChangeOnUndo() {
+        textView.undoManager?.registerUndo(withTarget: self) { editor in
+            MainActor.assumeIsolated {
+                editor.registerTextChangeOnUndo()
+                DispatchQueue.main.async {
+                    editor.textDidChange(Notification(name: NSText.didChangeNotification, object: editor.textView))
+                }
+            }
+        }
     }
 }

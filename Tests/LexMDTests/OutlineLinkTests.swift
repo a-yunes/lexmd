@@ -654,6 +654,23 @@ struct OutlineLinkTests {
 
     /// Revealing a heading far down a long document puts its line at the top of the editor on the
     /// first try, without scrolling the preview along by fraction.
+    /// Right after a document loads, the line at the top of the editor is its first line, even
+    /// before the text view has drawn (the outline highlights the heading there).
+    @Test func topVisibleLocationAfterLoad() throws {
+        let editor = EditorController()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = editor.scrollView
+        defer { window.contentView = nil }
+        var source = ""
+        for i in 0..<40 { source += "## Review \(i)\n\nSome text.\n\n" }
+        source += "## Review the change\n\nEnd.\n"
+        editor.load("# Other\n\nShort.\n")
+        editor.load(source)
+        let headings = DocumentStructure.analyze(source).headings
+        let top = editor.topVisibleLocation()
+        #expect(headings.last { $0.range.location <= top }?.title == "Review 0")
+    }
+
     @Test func editorRevealsDistantHeadingAtTop() throws {
         let editor = EditorController()
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.borderless], backing: .buffered, defer: false)

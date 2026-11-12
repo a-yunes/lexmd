@@ -572,9 +572,20 @@ extension EditorController {
     }
 
     /// The text location at the top of the visible editor area.
+    /// Asks the layout manager rather than `characterIndexForInsertion`, which answers with the end
+    /// of the text while the visible part is not laid out yet, as right after a document loads.
     func topVisibleLocation() -> Int {
         let bounds = scrollView.contentView.bounds
         let point = NSPoint(x: textView.textContainerInset.width + 4, y: bounds.minY + scrollView.contentInsets.top + 24)
-        return textView.characterIndexForInsertion(at: point)
+        guard let layout = textView.textLayoutManager, let content = layout.textContentManager else {
+            return textView.characterIndexForInsertion(at: point)
+        }
+        let origin = textView.textContainerOrigin
+        let inContainer = CGPoint(x: point.x - origin.x, y: max(0, point.y - origin.y))
+        layout.ensureLayout(for: CGRect(x: 0, y: inContainer.y, width: 1, height: 1))
+        guard let fragment = layout.textLayoutFragment(for: inContainer) else {
+            return textView.characterIndexForInsertion(at: point)
+        }
+        return content.offset(from: layout.documentRange.location, to: fragment.rangeInElement.location)
     }
 }

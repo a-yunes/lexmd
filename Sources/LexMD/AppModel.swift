@@ -294,6 +294,7 @@ final class AppModel {
     var subtitle: String {
         if let saveError { return saveError }
         guard currentFile != nil else { return rootURL?.lastPathComponent ?? "" }
+        if isCurrentDocumentMissing { return "No longer on disk; saving puts it back" }
         let words = wordCount.formatted()
         let minutes = max(1, Int((Double(wordCount) / 230).rounded()))
         return "\(words) \(wordCount == 1 ? "word" : "words") · \(minutes) min read"
@@ -424,7 +425,21 @@ final class AppModel {
         let path = FileScanner.canonicalPath(url.path)
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { return }
-        if isDir.boolValue {
+        let isDirectory = isDir.boolValue
+        let inside = rootURL.map { path.hasPrefix($0.path + "/") } ?? false
+        let newRoot = isDirectory ? path : (inside ? nil : (path as NSString).deletingLastPathComponent)
+        guard let newRoot, let root = rootURL?.path, newRoot != root else {
+            finishOpening(path, isDirectory: isDirectory)
+            return
+        }
+        // Opening another project closes these tabs: text that can't be saved is never dropped.
+        settleUnsavedText(before: "open another project") { [weak self] proceed in
+            if proceed { self?.finishOpening(path, isDirectory: isDirectory) }
+        }
+    }
+
+    private func finishOpening(_ path: String, isDirectory: Bool) {
+        if isDirectory {
             setRoot(URL(fileURLWithPath: path, isDirectory: true))
             if tabStore.list.isEmpty { restoreTabs() }
             return
@@ -521,6 +536,7 @@ final class AppModel {
             projectFolderChanged()
             return
         }
+        if eventsTouchOpenDocuments(events) { followMovedDocuments() }
         linksHandleFileEvents(events, root: root)
         gitFileEvents(events)
         var structural = false
@@ -790,12 +806,17 @@ final class AppModel {
 
     func saveNow() {
         saveTask?.cancel()
-        guard let url = currentFile, text != savedText, !sidebarFiles.isTrashing(url.path) else { return }
+        guard currentFile != nil, text != savedText else { return }
+        // Another app may have moved the file since the last event: follow it rather than
+        // recreating it here.
+        if let path = currentFile?.path, !FileManager.default.fileExists(atPath: path) { followMovedDocuments() }
+        guard let url = currentFile, !sidebarFiles.isTrashing(url.path) else { return }
         do {
             // Write in place so file watchers see a modification rather than a replace.
             try text.write(to: url, atomically: false, encoding: .utf8)
             savedText = text
             if saveError != nil { saveError = nil }
+            if isCurrentDocumentMissing { updateMissingDocuments() }
             gitDocumentSaved()
         } catch {
             saveError = "Couldn’t save: \(error.localizedDescription)"

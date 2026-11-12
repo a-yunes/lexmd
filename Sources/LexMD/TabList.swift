@@ -187,6 +187,10 @@ final class TabStore {
     }
     /// The tab being dragged in the tab bar.
     var draggingID: UUID?
+    /// Tabs whose files are no longer on disk.
+    var missing: Set<UUID> = []
+    /// Each tab's file by identity, to follow renames by other apps.
+    @ObservationIgnored var references: [UUID: Data] = [:]
 
     init() {
         alwaysShowTabBar = UserDefaults.standard.object(forKey: AppModel.Keys.alwaysShowTabBar) as? Bool ?? true

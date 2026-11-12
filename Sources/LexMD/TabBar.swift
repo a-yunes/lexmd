@@ -69,6 +69,7 @@ private struct TabItem: View {
 
     var body: some View {
         let unsaved = model.tabHasUnsavedChanges(tab.id)
+        let missing = model.tabStore.missing.contains(tab.id)
         let showsDot = unsaved && !isHovering
         HStack(spacing: 4) {
             Button { model.closeTab(tab.id) } label: {
@@ -83,6 +84,8 @@ private struct TabItem: View {
             .help(unsaved ? "Unsaved changes. Close Tab" : "Close Tab")
             Text(title)
                 .font(.system(size: 12, weight: isActive ? .medium : .regular))
+                .italic(missing)
+                .strikethrough(missing)
                 .foregroundStyle(isActive ? .primary : .secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -104,7 +107,7 @@ private struct TabItem: View {
             return NSItemProvider(object: tab.id.uuidString as NSString)
         }
         .onDrop(of: [.text], delegate: TabDropDelegate(target: tab.id, model: model))
-        .help(relativePath)
+        .help(missing ? "\(relativePath) is no longer on disk. Saving puts it back." : relativePath)
         .contextMenu {
             Button("Close Tab") { model.closeTab(tab.id) }
             Button("Close Other Tabs") { model.closeOtherTabs(tab.id) }
@@ -118,7 +121,7 @@ private struct TabItem: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
-        .accessibilityValue(unsaved ? "Unsaved changes" : "")
+        .accessibilityValue([unsaved ? "Unsaved changes" : nil, missing ? "No longer on disk" : nil].compactMap(\.self).joined(separator: ", "))
         .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction { model.selectTab(tab.id) }
         .accessibilityAction(named: "Close Tab") { model.closeTab(tab.id) }

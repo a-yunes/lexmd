@@ -51,6 +51,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    /// Text that can't be saved is never dropped silently: quitting asks about it first.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let model = AppModel.shared
+        model.saveAllTabs()
+        guard !model.unsavedDocuments().isEmpty else { return .terminateNow }
+        model.settleUnsavedText(before: "quit") { proceed in
+            DispatchQueue.main.async { sender.reply(toApplicationShouldTerminate: proceed) }
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         AppModel.shared.saveAllTabs()
     }
