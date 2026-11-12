@@ -3,6 +3,7 @@ import Foundation
 import Testing
 import WebKit
 @testable import LexMD
+@testable import LexMDRendering
 
 /// Outline headings, wiki links, the project link index, broken-link checks, and link completion.
 @MainActor

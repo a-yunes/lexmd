@@ -8,7 +8,10 @@ keystroke away. Built with SwiftUI and AppKit as a Swift package. Keep documenta
 
 - `Sources/LexMD`: the app. `AppModel` owns state; `EditorController` (NSTextView) and
   `PreviewController` (WKWebView) are long-lived AppKit views hosted by SwiftUI.
-- `Resources`: `Info.plist`, the Icon Composer document, and icon source art.
+- `Sources/LexMDRendering`: Markdown to HTML and the preview's styles, shared by the app and
+  `Sources/LexMDQuickLook`, the Quick Look extension (bundled as `PlugIns/LexMDQuickLook.appex`).
+- `Resources`: `Info.plist`, the Icon Composer document, icon source art, the `lexmd` command
+  (`bin/lexmd`), and the extension's `Info.plist` and entitlements (`QuickLook`).
 - `scripts/build-app.sh` builds `build/LexMD.app`; `scripts/package-release.sh` builds a release.
 
 ## Rules

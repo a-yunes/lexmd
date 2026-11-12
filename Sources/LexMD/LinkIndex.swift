@@ -1,4 +1,5 @@
 import Foundation
+import LexMDRendering
 import Observation
 
 /// A heading of an indexed document.
@@ -367,7 +368,7 @@ enum LinkDestination: Equatable {
 
 /// Checks links in one document against the file system and the project index. Built on the
 /// main thread, used off it while rendering and analyzing.
-struct LinkContext: Sendable {
+struct LinkContext: Sendable, MarkdownLinkRendering {
     var documentPath: String?
     var snapshot: LinkIndexSnapshot
     /// Whether the preview marks broken local links.

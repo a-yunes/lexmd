@@ -1,4 +1,5 @@
 import Foundation
+import LexMDRendering
 import Markdown
 
 /// A heading with the id the preview gives it.

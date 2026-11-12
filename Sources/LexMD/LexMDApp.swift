@@ -38,16 +38,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        guard let url = urls.first else { return }
-        AppModel.shared.open(url)
+        AppModel.shared.open(urls)
     }
 
     /// Finder service: "Open in LexMD" for folders and Markdown files.
     @objc func openInLexMD(_ pasteboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>) {
         let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
-        guard let url = urls.first else { return }
+        guard !urls.isEmpty else { return }
         NSApp.activate(ignoringOtherApps: true)
-        AppModel.shared.open(url)
+        AppModel.shared.open(urls)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -75,6 +74,7 @@ struct LexMDCommands: Commands {
         CommandGroup(after: .appInfo) {
             Button("Check for Updates…") { model.updates.checkForUpdates() }
                 .disabled(!model.updates.canCheck)
+            item(.installCommandLineTool) { model.installCommandLineTool() }
         }
         CommandGroup(replacing: .help) {
             Button("Welcome to LexMD") { model.showOnboarding() }

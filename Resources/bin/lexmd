@@ -1,0 +1,144 @@
+#!/bin/sh
+# lexmd: opens Markdown files and folders in LexMD.
+# Ships in LexMD.app/Contents/Resources/bin and is usually linked from /usr/local/bin.
+
+set -u
+
+BUNDLE_ID=io.github.a-yunes.lexmd
+
+usage() {
+  cat <<'EOF'
+Usage: lexmd [options] [path ...]
+
+Opens Markdown files and folders in LexMD. A folder opens as the project,
+and files open in tabs. With no paths, LexMD just opens.
+
+Options:
+  -n, --new      Create missing files as empty Markdown files, then open them
+  -h, --help     Show this help
+  -v, --version  Show the LexMD version
+  --             Treat every following argument as a path
+EOF
+}
+
+warn() {
+  printf 'lexmd: %s\n' "$*" >&2
+}
+
+# The LexMD.app holding this script, following links such as /usr/local/bin/lexmd.
+app_bundle() {
+  self=$0
+  hops=0
+  while [ -L "$self" ] && [ "$hops" -lt 32 ]; do
+    target=$(readlink "$self") || return 1
+    case $target in
+      /*) self=$target ;;
+      *) self=$(dirname "$self")/$target ;;
+    esac
+    hops=$((hops + 1))
+  done
+  dir=$(cd "$(dirname "$self")" 2>/dev/null && pwd -P) || return 1
+  app=${dir%/Contents/Resources/bin}
+  if [ "$app" = "$dir" ] || [ ! -f "$app/Contents/Info.plist" ]; then
+    return 1
+  fi
+  printf '%s\n' "$app"
+}
+
+is_markdown() {
+  case $1 in
+    *.[mM][dD] | *.[mM][aA][rR][kK][dD][oO][wW][nN] | *.[mM][dD][oO][wW][nN] | *.[mM][kK][dD] | \
+    *.[mM][kK][dD][nN] | *.[mM][dD][wW][nN] | *.[mM][dD][tT][xX][tT] | *.[mM][dD][tT][eE][xX][tT]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Prints the absolute, symlink-free form of a path whose folder exists.
+absolute() {
+  if [ -d "$1" ]; then
+    (cd "$1" 2>/dev/null && pwd -P)
+    return
+  fi
+  parent=$(dirname "$1")
+  name=$(basename "$1")
+  parent=$(cd "$parent" 2>/dev/null && pwd -P) || return 1
+  case $parent in
+    /) printf '/%s\n' "$name" ;;
+    *) printf '%s/%s\n' "$parent" "$name" ;;
+  esac
+}
+
+create=0
+for arg in "$@"; do
+  case $arg in
+    --) break ;;
+    -h | --help) usage; exit 0 ;;
+    -v | --version)
+      app=$(app_bundle) || { warn "cannot find LexMD.app around this script"; exit 1; }
+      version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null) || {
+        warn "cannot read the LexMD version"
+        exit 1
+      }
+      printf 'LexMD %s\n' "$version"
+      exit 0
+      ;;
+    -n | --new) create=1 ;;
+    -?*)
+      warn "unknown option: $arg"
+      printf 'Run "lexmd --help" for usage.\n' >&2
+      exit 2
+      ;;
+  esac
+done
+
+# Rebuild the arguments as absolute paths, dropping options and reporting missing paths.
+status=0
+paths_done=0
+count=$#
+for arg in "$@"; do
+  shift
+  if [ "$paths_done" -eq 0 ]; then
+    case $arg in
+      --) paths_done=1; continue ;;
+      -n | --new) continue ;;
+    esac
+  fi
+  path=$arg
+  if [ ! -e "$path" ]; then
+    if [ "$create" -eq 0 ]; then
+      warn "no such file or folder: $arg"
+      status=1
+      continue
+    fi
+    is_markdown "$path" || path=$path.md
+    if [ ! -e "$path" ]; then
+      if [ ! -d "$(dirname "$path")" ]; then
+        warn "cannot create $path: its folder does not exist"
+        status=1
+        continue
+      fi
+      if ! (set -C; : >"$path") 2>/dev/null; then
+        warn "cannot create $path"
+        status=1
+        continue
+      fi
+    fi
+  fi
+  if ! resolved=$(absolute "$path"); then
+    warn "cannot resolve $arg"
+    status=1
+    continue
+  fi
+  set -- "$@" "$resolved"
+done
+
+if [ "$count" -gt 0 ] && [ "$#" -eq 0 ]; then
+  exit "$status"
+fi
+
+if app=$(app_bundle); then
+  open -a "$app" "$@" || exit 1
+else
+  open -b "$BUNDLE_ID" "$@" || exit 1
+fi
+exit "$status"

@@ -1,9 +1,17 @@
 import Foundation
 import Markdown
 
-enum MarkdownHTML {
+/// Resolves wiki links and marks broken links while rendering. The app's `LinkContext` conforms.
+package protocol MarkdownLinkRendering {
+    /// The markup for one text run, with wiki links as links. `restore` turns placeholders back into source.
+    mutating func html(forText text: String, restore: (String) -> String) -> String
+    /// The class attribute for a Markdown link, or "" when it needs none.
+    mutating func linkClass(forDestination destination: String) -> String
+}
+
+package enum MarkdownHTML {
     /// `links` resolves wiki links and marks broken local links; without it they render as text.
-    static func render(_ source: String, links: LinkContext? = nil) -> String {
+    package static func render(_ source: String, links: (any MarkdownLinkRendering)? = nil) -> String {
         var body = source
         var prefix = ""
         if let (frontMatter, rest) = splitFrontMatter(source) {
@@ -15,7 +23,7 @@ enum MarkdownHTML {
 
     /// Renders Markdown with math, diagrams, and optionally footnotes (see `MarkdownExtensions`).
     /// Footnote bodies get the same link context, so their wiki links and broken links render too.
-    static func renderBody(_ source: String, footnotes: Bool, links: LinkContext? = nil) -> String {
+    package static func renderBody(_ source: String, footnotes: Bool, links: (any MarkdownLinkRendering)? = nil) -> String {
         let extensions = MarkdownExtensions(source, footnotes: footnotes)
         let document = Document(parsing: extensions.source)
         var renderer = HTMLRenderer()
@@ -26,11 +34,11 @@ enum MarkdownHTML {
     }
 
     /// Fenced code in these languages is drawn as a diagram by the preview.
-    static func isDiagram(_ language: String) -> Bool {
+    package static func isDiagram(_ language: String) -> Bool {
         ["mermaid", "pele"].contains(language.lowercased())
     }
 
-    static func wordCount(_ source: String) -> Int {
+    package static func wordCount(_ source: String) -> Int {
         var count = 0
         var inWord = false
         for scalar in source.unicodeScalars {
@@ -57,7 +65,7 @@ enum MarkdownHTML {
         return nil
     }
 
-    static func escape(_ s: String) -> String {
+    package static func escape(_ s: String) -> String {
         var out = ""
         out.reserveCapacity(s.utf8.count)
         for c in s {
@@ -75,7 +83,7 @@ enum MarkdownHTML {
 
 private struct HTMLRenderer: MarkupWalker {
     var result = ""
-    var links: LinkContext?
+    var links: (any MarkdownLinkRendering)?
     private var linkDepth = 0
     private var slugCounts: [String: Int] = [:]
     private var inTableHead = false

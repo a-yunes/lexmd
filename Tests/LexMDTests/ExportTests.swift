@@ -3,6 +3,7 @@ import Foundation
 import PDFKit
 import Testing
 @testable import LexMD
+@testable import LexMDRendering
 
 @MainActor
 @Suite(.serialized)
