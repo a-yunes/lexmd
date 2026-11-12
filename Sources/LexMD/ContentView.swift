@@ -370,7 +370,7 @@ struct RowMenu: View {
 
     var body: some View {
         FileActionMenuItems(url: url)
-        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         Button("Copy Path") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(url.path, forType: .string)
