@@ -95,6 +95,16 @@ struct QuickLookPageTests {
         #expect(html.contains(#"src="data:image/png;base64,iVBORw0KGgo=""#))
     }
 
+    @Test func readsImagesThroughSymlinks() throws {
+        let folder = try TestFolder()
+        try folder.writePNG("real.png")
+        let link = folder.url.appendingPathComponent("link.png")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: folder.url.appendingPathComponent("real.png"))
+        #expect(QuickLookPage.readImage(link, limit: 1 << 20) != nil, "the app's preview shows symlinked images too")
+        #expect(QuickLookPage.readImage(link, limit: 1) == nil)
+        #expect(QuickLookPage.readImage(folder.url, limit: 1 << 20) == nil)
+    }
+
     @Test func capsTotalImageSize() throws {
         let folder = try TestFolder()
         let file = folder.url.appendingPathComponent("Doc.md")

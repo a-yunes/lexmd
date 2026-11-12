@@ -207,8 +207,10 @@ package struct QuickLookPage {
         }
     }
 
-    /// The default image loader: a regular file within the size limit.
+    /// The default image loader: a regular file within the size limit. Symlinks are followed,
+    /// as in the app's preview.
     package static func readImage(_ url: URL, limit: Int) -> Data? {
+        let url = url.resolvingSymlinksInPath()
         guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
               values.isRegularFile == true, let size = values.fileSize, size <= limit else { return nil }
         return try? Data(contentsOf: url, options: .mappedIfSafe)
