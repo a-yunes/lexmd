@@ -16,6 +16,8 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     /// LexMD's preview script runs here, apart from the page world that holds document markup.
     private static let world = WKContentWorld.world(name: "LexMD")
     private static let pageURL = URL(string: "\(DocumentSchemeHandler.scheme):///")!
+    /// Pele draws diagrams and KaTeX typesets math; each is loaded when markup first needs it.
+    private static let libraries = [("class=\"lexmd-diagram\"", VendorAssets.peleScript), ("class=\"lexmd-math", VendorAssets.katexScript)]
 
     private var highlight: Highlight?
     private var highlightApplied = false
@@ -28,19 +30,27 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     private var pendingReset = false
     private var scale: Double = 1
     private(set) var allowsRemoteContent: Bool
+    private let userContent: WKUserContentController
+    private var injectedLibraries: Set<Int> = []
+    private var pageLibraries: Set<Int> = []
 
     init(allowsRemoteContent: Bool) {
         self.allowsRemoteContent = allowsRemoteContent
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.setURLSchemeHandler(DocumentSchemeHandler(), forURLScheme: DocumentSchemeHandler.scheme)
+        configuration.setURLSchemeHandler(VendorSchemeHandler(), forURLScheme: VendorSchemeHandler.scheme)
         // Scripts in documents never run; LexMD's own script below is unaffected.
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         let content = WKUserContentController()
         content.addUserScript(WKUserScript(
+            source: PreviewTemplate.renderingScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Self.world
+        ))
+        content.addUserScript(WKUserScript(
             source: PreviewTemplate.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Self.world
         ))
         configuration.userContentController = content
+        userContent = content
         webView = WKWebView(frame: .zero, configuration: configuration)
 
         super.init()
@@ -56,6 +66,7 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     private func loadTemplate() {
         isLoaded = false
         isLoadingTemplate = true
+        pageLibraries = injectedLibraries
         webView.loadHTMLString(PreviewTemplate.html(allowsRemoteContent: allowsRemoteContent), baseURL: Self.pageURL)
     }
 
@@ -79,10 +90,25 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         let base = lastBase.flatMap { DocumentSchemeHandler.url(for: $0)?.absoluteString } ?? ""
         let reset = pendingReset
         pendingReset = false
+        loadLibraries(for: lastHTML)
         call("lexmdRender(html, base, reset)", ["html": lastHTML, "base": base, "reset": reset])
         if highlight != nil || highlightApplied {
             applyHighlight(scroll: Date() < highlightScrollUntil)
             highlightScrollUntil = .distantPast
+        }
+    }
+
+    /// Pele and KaTeX take tens of milliseconds to evaluate, so they are injected into LexMD's
+    /// world (never loaded by the page) when a document first needs them, then kept as user
+    /// scripts for later page loads. Calls into the page run in order, so rendering sees them.
+    private func loadLibraries(for html: String) {
+        for (index, library) in Self.libraries.enumerated() where !pageLibraries.contains(index) && html.contains(library.0) {
+            guard let source = library.1 else { continue }
+            pageLibraries.insert(index)
+            if injectedLibraries.insert(index).inserted {
+                userContent.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Self.world))
+            }
+            webView.evaluateJavaScript(source, in: nil, in: Self.world, completionHandler: nil)
         }
     }
 

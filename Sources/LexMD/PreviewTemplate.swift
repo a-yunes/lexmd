@@ -4,6 +4,7 @@
 enum PreviewTemplate {
     static func html(allowsRemoteContent: Bool) -> String {
         page.replacingOccurrences(of: "REMOTE", with: allowsRemoteContent ? " https:" : "")
+            .replacingOccurrences(of: "</head>", with: renderingHead + "</head>")
     }
 
     private static let page = #"""
@@ -11,7 +12,7 @@ enum PreviewTemplate {
 <html>
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src lexmd-doc: data:REMOTE; media-src lexmd-doc: data:REMOTE; font-src lexmd-doc: data:; base-uri lexmd-doc:; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src lexmd-doc: data:REMOTE; media-src lexmd-doc: data:REMOTE; font-src lexmd-doc: lexmd-vendor: data:; base-uri lexmd-doc:; form-action 'none'">
 <meta name="color-scheme" content="light dark">
 <base id="lexmd-base" href="">
 <style>
@@ -279,6 +280,7 @@ mark.lexmd-hit.current {
     if (node.nodeType !== 1) return;
     var codes = node.matches && node.matches('pre code') ? [node] : node.querySelectorAll('pre code[class*="language-"]');
     for (var i = 0; i < codes.length; i++) highlight(codes[i]);
+    if (window.lexmdEnhance) window.lexmdEnhance(node);
   }
 
   // Patch only the top-level blocks that changed so images and scroll position stay put.
@@ -337,7 +339,7 @@ mark.lexmd-hit.current {
     var walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
       acceptNode: function (n) {
         var p = n.parentNode;
-        if (!p || p.closest('.copy, .lang, script, style')) return NodeFilter.FILTER_REJECT;
+        if (!p || p.closest('.copy, .lang, script, style, svg, .katex')) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -434,7 +436,7 @@ mark.lexmd-hit.current {
 
   var HASH = /^(py|python|python3|rb|ruby|sh|bash|zsh|shell|console|fish|yaml|yml|toml|r|perl|pl|ps1|powershell|dockerfile|makefile|make|conf|ini|properties|elixir|ex|exs|nim|coffee|julia|jl|cmake|nix|graphql|gql|tf|hcl|env|gitignore)$/;
   var DASH = /^(sql|lua|haskell|hs|elm|ada|psql|mysql|sqlite)$/;
-  var SKIP = /^(text|txt|plain|plaintext|md|markdown|html|xml|svg|csv|tsv|log|output|mermaid)$/;
+  var SKIP = /^(text|txt|plain|plaintext|md|markdown|html|xml|svg|csv|tsv|log|output|mermaid|pele|math)$/;
 
   function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
