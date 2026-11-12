@@ -63,6 +63,8 @@ final class EditorController: NSObject, NSTextViewDelegate {
     var imageContext: (() -> ImageContext?)?
     /// Called when spelling or grammar checking is toggled from the Edit menu.
     var onCheckingChange: ((_ spelling: Bool, _ grammar: Bool) -> Void)?
+    /// Called when a substitution is toggled from the editor's context menu (FindReplace.swift).
+    var onSubstitutionsChange: ((TextSubstitutions) -> Void)?
     var isFocusModeEnabled = false { didSet { if isFocusModeEnabled != oldValue { updateFocusDimming() } } }
     var isTypewriterScrollingEnabled = false {
         didSet { if isTypewriterScrollingEnabled != oldValue { typewriterSettingDidChange() } }

@@ -129,6 +129,14 @@ final class AppModel {
     var typewriterScrolling = false {
         didSet { defaults.set(typewriterScrolling, forKey: Keys.typewriterScrolling); applyEditorSettings() }
     }
+    /// Edit > Substitutions and Correct Spelling Automatically; all off by default.
+    var substitutions = TextSubstitutions() {
+        didSet {
+            guard substitutions != oldValue else { return }
+            defaults.set(substitutions.dictionary, forKey: Keys.substitutions)
+            applyEditorSettings()
+        }
+    }
     /// Shows git status badges in the sidebar for projects in git repositories.
     var showGitStatus = true {
         didSet {
@@ -137,7 +145,7 @@ final class AppModel {
         }
     }
 
-    // In-document find (preview find bar; the editor uses the native find bar)
+    // In-document find and replace; the find bar searches the preview and the editor.
     var isFindBarVisible = false
     var findQuery = "" {
         didSet { if findQuery != oldValue { findIndex = 0; refreshFind(scroll: true) } }
@@ -145,9 +153,22 @@ final class AppModel {
     var findCaseSensitive = false {
         didSet { if findCaseSensitive != oldValue { findIndex = 0; refreshFind(scroll: true) } }
     }
+    var findWholeWord = false {
+        didSet { if findWholeWord != oldValue { findIndex = 0; refreshFind(scroll: true) } }
+    }
+    var findUsesRegex = false {
+        didSet { if findUsesRegex != oldValue { findIndex = 0; refreshFind(scroll: true) } }
+    }
     var findCount = 0
     var findIndex = 0
     var findFocusToken = 0
+    /// Shown in place of the match count after Replace All, until the next search.
+    var findStatus: String?
+    var isReplaceVisible = false
+    var replaceQuery = ""
+    var replaceFocusToken = 0
+    /// Whether the editor's selection can seed the find bar (Use Selection for Find).
+    var canUseSelectionForFind = false
 
     // Find in Files
     var isQuickSearchVisible = false
@@ -244,6 +265,7 @@ final class AppModel {
         static let checksGrammar = "checksGrammar"
         static let focusMode = "focusMode"
         static let typewriterScrolling = "typewriterScrolling"
+        static let substitutions = "textSubstitutions"
         static let showGitStatus = "showGitStatus"
         static let outlineVisible = "outlineVisible"
         static let suggestsLinks = "suggestsLinks"
@@ -267,6 +289,7 @@ final class AppModel {
         checksGrammar = defaults.bool(forKey: Keys.checksGrammar)
         focusMode = defaults.bool(forKey: Keys.focusMode)
         typewriterScrolling = defaults.bool(forKey: Keys.typewriterScrolling)
+        substitutions = TextSubstitutions(dictionary: defaults.dictionary(forKey: Keys.substitutions))
         configureEditorFeatures()
         isOutlineVisible = defaults.bool(forKey: Keys.outlineVisible)
         suggestsLinks = defaults.object(forKey: Keys.suggestsLinks) as? Bool ?? true

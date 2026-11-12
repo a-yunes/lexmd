@@ -24,7 +24,10 @@ struct ShortcutGroupingTests {
             .newDocument, .newFolder, .open, .quickOpen, .newTab, .closeTab, .reopenClosedTab, .save,
             .revealInFinder, .renameItem, .duplicateItem, .moveToTrash, .exportPDF, .exportHTML, .printDocument,
         ])
-        #expect(listed(.edit) == [.copyRichText, .find, .findNext, .findPrevious, .findInFiles])
+        #expect(listed(.edit) == [
+            .copyRichText, .find, .findAndReplace, .findNext, .findPrevious, .useSelectionForFind, .jumpToSelection,
+            .findInFiles,
+        ])
         #expect(listed(.view) == [
             .toggleSidebar, .toggleOutline, .previewOnly, .split, .editorOnly, .focusMode, .typewriterScrolling,
             .expandAll, .collapseAll, .zoomIn, .zoomOut, .zoomReset,
@@ -44,6 +47,7 @@ struct ShortcutGroupingTests {
             "formatTable", "focusMode", "typewriterScrolling", "commit",
             "exportPDF", "exportHTML", "printDocument", "copyRichText", "toggleOutline",
             "installCommandLineTool", "renameInSidebar", "trashInSidebar",
+            "findAndReplace", "useSelectionForFind", "jumpToSelection",
         ])
     }
 

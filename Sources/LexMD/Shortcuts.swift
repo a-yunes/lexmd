@@ -115,7 +115,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case installCommandLineTool
     case newDocument, newFolder, open, quickOpen, newTab, closeTab, reopenClosedTab, save
     case revealInFinder, renameItem, duplicateItem, moveToTrash, exportPDF, exportHTML, printDocument
-    case copyRichText, find, findNext, findPrevious, findInFiles
+    case copyRichText, find, findAndReplace, findNext, findPrevious, useSelectionForFind, jumpToSelection, findInFiles
     case bold, italic, strikethrough, inlineCode, link, formatTable
     case toggleSidebar, toggleOutline, previewOnly, split, editorOnly, focusMode, typewriterScrolling
     case expandAll, collapseAll, zoomIn, zoomOut, zoomReset
@@ -139,7 +139,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .installCommandLineTool: .app
         case .newDocument, .newFolder, .open, .quickOpen, .newTab, .closeTab, .reopenClosedTab, .save,
              .revealInFinder, .renameItem, .duplicateItem, .moveToTrash, .exportPDF, .exportHTML, .printDocument: .file
-        case .copyRichText, .find, .findNext, .findPrevious, .findInFiles: .edit
+        case .copyRichText, .find, .findAndReplace, .findNext, .findPrevious, .useSelectionForFind, .jumpToSelection,
+             .findInFiles: .edit
         case .bold, .italic, .strikethrough, .inlineCode, .link, .formatTable: .format
         case .toggleSidebar, .toggleOutline, .previewOnly, .split, .editorOnly, .focusMode, .typewriterScrolling,
              .expandAll, .collapseAll, .zoomIn, .zoomOut, .zoomReset: .view
@@ -170,6 +171,9 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .findNext: "Find Next"
         case .findPrevious: "Find Previous"
         case .findInFiles: "Find in Files…"
+        case .findAndReplace: "Find and Replace…"
+        case .useSelectionForFind: "Use Selection for Find"
+        case .jumpToSelection: "Jump to Selection"
         case .goBack: "Back"
         case .goForward: "Forward"
         case .bold: "Bold"
@@ -225,6 +229,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .findNext: "cmd+g"
         case .findPrevious: "shift+cmd+g"
         case .findInFiles: "shift+cmd+f"
+        // The standard ⌥⌘F and ⌘E belong to Focus Mode and Inline Code.
+        case .findAndReplace: ""
+        case .useSelectionForFind: ""
+        case .jumpToSelection: "cmd+j"
         case .goBack: "cmd+["
         case .goForward: "cmd+]"
         case .bold: "shift+cmd+b"

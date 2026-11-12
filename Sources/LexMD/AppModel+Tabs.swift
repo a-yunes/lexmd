@@ -438,7 +438,7 @@ extension EditorController {
     /// Undoing or redoing edits made through the text storage does not report the change to
     /// the delegate, so the model would keep (and autosave) the text from before the undo. This
     /// reports it once the undo or redo has run.
-    private func registerTextChangeOnUndo() {
+    func registerTextChangeOnUndo() {
         textView.undoManager?.registerUndo(withTarget: self) { editor in
             MainActor.assumeIsolated {
                 editor.registerTextChangeOnUndo()

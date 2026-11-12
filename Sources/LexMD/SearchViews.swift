@@ -9,6 +9,8 @@ struct CommandTextField: NSViewRepresentable {
     var placeholder: String
     var font: NSFont
     var focusToken: Int
+    /// Whether the field takes focus when it first appears, not only when `focusToken` changes.
+    var focusesOnAppear = true
     var onMove: (Int) -> Void = { _ in }
     var onSubmit: (_ shift: Bool) -> Void = { _ in }
     var onCancel: () -> Void = {}
@@ -54,7 +56,7 @@ struct CommandTextField: NSViewRepresentable {
 
         init(_ parent: CommandTextField) {
             self.parent = parent
-            self.focusToken = parent.focusToken - 1
+            self.focusToken = parent.focusesOnAppear ? parent.focusToken - 1 : parent.focusToken
         }
 
         func controlTextDidChange(_ notification: Notification) {
@@ -119,17 +121,35 @@ private func highlighted(_ text: String, _ range: NSRange?, matchFont: Font, mat
 
 // MARK: - Find bar
 
-/// Floating find bar for the open document, styled to match the Find in Files panel.
+/// Floating find bar for the open document, styled to match the Find in Files panel, with an
+/// optional replace row.
 struct FindBar: View {
     @Environment(AppModel.self) private var model
     private let shape = RoundedRectangle(cornerRadius: 13, style: .continuous)
+    /// The width of the disclosure button and magnifying glass, so both fields line up.
+    private let leadingWidth: CGFloat = 36
 
-    var body: some View {
+    private var findRow: some View {
         @Bindable var model = model
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
+        return HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Button { model.toggleReplace() } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .rotationEffect(.degrees(model.isReplaceVisible ? 90 : 0))
+                        .frame(width: 12, height: 20)
+                        .foregroundStyle(.secondary)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(model.isReplaceVisible ? "Hide Replace" : model.helpText("Show Replace", .findAndReplace))
+                .accessibilityLabel(model.isReplaceVisible ? "Hide Replace" : "Show Replace")
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            .frame(width: leadingWidth, alignment: .leading)
             CommandTextField(
                 text: $model.findQuery,
                 placeholder: "Find in Document",
@@ -140,6 +160,7 @@ struct FindBar: View {
                 onCancel: { model.closeFindBar() }
             )
             .frame(width: 210, height: 20)
+            .accessibilityLabel("Find")
             Text(countLabel)
                 .font(.system(size: 12))
                 .monospacedDigit()
@@ -147,7 +168,11 @@ struct FindBar: View {
                 .frame(minWidth: 62, alignment: .trailing)
                 .fixedSize()
             Divider().frame(height: 18)
-            OptionToggle(title: "Aa", help: "Match Case", isOn: $model.findCaseSensitive)
+            HStack(spacing: 4) {
+                OptionToggle(title: "Aa", help: "Match Case", isOn: $model.findCaseSensitive)
+                OptionToggle(title: "W", help: "Whole Words", isOn: $model.findWholeWord)
+                OptionToggle(title: ".*", help: "Regular Expression", isOn: $model.findUsesRegex)
+            }
             HStack(spacing: 2) {
                 BarIconButton(symbol: "chevron.up", help: model.helpText("Previous Match", .findPrevious)) { model.findNext(false) }
                 BarIconButton(symbol: "chevron.down", help: model.helpText("Next Match", .findNext)) { model.findNext(true) }
@@ -155,9 +180,52 @@ struct FindBar: View {
             .disabled(model.findCount == 0)
             BarIconButton(symbol: "xmark", help: "Close (esc)") { model.closeFindBar() }
         }
+        .frame(height: 44)
+    }
+
+    private var replaceRow: some View {
+        @Bindable var model = model
+        return HStack(spacing: 8) {
+            Color.clear.frame(width: leadingWidth, height: 1)
+            CommandTextField(
+                text: $model.replaceQuery,
+                placeholder: "Replace With",
+                font: .systemFont(ofSize: 14),
+                focusToken: model.replaceFocusToken,
+                // Like Find and Replace…: the replace field starts out focused when there is
+                // something to find, otherwise the find field keeps focus.
+                focusesOnAppear: !model.findQuery.isEmpty,
+                onMove: { model.findNext($0 > 0) },
+                onSubmit: { _ in model.replaceCurrent() },
+                onCancel: { model.closeFindBar() }
+            )
+            .frame(width: 210, height: 20)
+            .accessibilityLabel("Replace With")
+            .help(model.findUsesRegex ? "$0 inserts the match and $1, $2, and so on insert its groups." : "")
+            Spacer(minLength: 8)
+            Group {
+                Button("Replace") { model.replaceCurrent() }
+                    .help("Replace the current match and find the next one")
+                Button("Replace All") { model.replaceAll() }
+                    .help("Replace every match in the document")
+            }
+            .controlSize(.small)
+            .disabled(model.findCount == 0)
+        }
+        .padding(.trailing, 4)
+        .frame(height: 34)
+        .padding(.bottom, 6)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            findRow
+            if model.isReplaceVisible {
+                replaceRow
+            }
+        }
         .padding(.leading, 14)
         .padding(.trailing, 8)
-        .frame(height: 44)
         .background(shape.fill(.regularMaterial))
         .overlay(shape.strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.16), radius: 18, y: 8)
@@ -165,7 +233,9 @@ struct FindBar: View {
     }
 
     private var countLabel: String {
-        model.findCount == 0 ? "No matches" : "\(model.findIndex + 1) of \(model.findCount)"
+        if let status = model.findStatus { return status }
+        if model.isFindPatternInvalid { return "Invalid pattern" }
+        return model.findCount == 0 ? "No matches" : "\(model.findIndex + 1) of \(model.findCount)"
     }
 }
 
