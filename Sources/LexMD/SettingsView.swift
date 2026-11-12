@@ -43,6 +43,12 @@ private struct GeneralSettings: View {
                     Text("A folder that holds just one item is merged into it, so a lone README.md inside “guides” shows as one row: guides › README.")
                 }
             }
+            Section("Tabs") {
+                Toggle(isOn: Binding(get: { model.tabStore.alwaysShowTabBar }, set: { model.tabStore.alwaysShowTabBar = $0 })) {
+                    Text("Always show tab bar")
+                    Text("Show the tab bar even when only one document is open.")
+                }
+            }
             Section("Preview") {
                 Toggle(isOn: $model.loadsRemoteContent) {
                     Text("Load images from the web")

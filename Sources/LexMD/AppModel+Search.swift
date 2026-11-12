@@ -134,6 +134,10 @@ extension AppModel {
         quickKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.isQuickSearchVisible else { return event }
             let modifiers = event.modifierFlags.intersection([.command, .option, .control])
+            if modifiers == .command, event.keyCode == 36 || event.keyCode == 76 {
+                self.activateQuickItem(at: self.quickSelection, inNewTab: true)
+                return nil
+            }
             guard modifiers.isEmpty else { return event }
             switch event.keyCode {
             case 125: self.moveQuickSelection(1)
@@ -161,16 +165,17 @@ extension AppModel {
         activateQuickItem(at: quickSelection)
     }
 
-    func activateQuickItem(at index: Int) {
+    func activateQuickItem(at index: Int, inNewTab: Bool = false) {
         guard let item = quickItem(at: index) else { NSSound.beep(); return }
         closeQuickSearch()
+        let newTab = inNewTab || NSEvent.modifierFlags.contains(.command)
         switch item {
         case .file(let file):
             reveal(file.path)
-            selectedPath = file.path
+            if newTab { openInNewTab(file.path) } else { selectedPath = file.path }
         case .hit(let hit):
             reveal(hit.path)
-            selectedPath = hit.path
+            if newTab { openInNewTab(hit.path) } else { selectedPath = hit.path }
             revealOccurrence(hit.occurrence)
         }
     }

@@ -27,6 +27,8 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     private var lastBase: URL?
     private var pendingReset = false
     private var scale: Double = 1
+    /// Scroll position (0...1) to apply after the next render, used when switching tabs.
+    var pendingScrollFraction: Double?
     private(set) var allowsRemoteContent: Bool
 
     init(allowsRemoteContent: Bool) {
@@ -84,6 +86,10 @@ final class PreviewController: NSObject, WKNavigationDelegate {
             applyHighlight(scroll: Date() < highlightScrollUntil)
             highlightScrollUntil = .distantPast
         }
+        if let fraction = pendingScrollFraction {
+            pendingScrollFraction = nil
+            call("lexmdScroll(f)", ["f": fraction])
+        }
     }
 
     /// Highlights matches in the rendered document; `current` marks (and optionally scrolls to) one of them.
@@ -110,6 +116,13 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     func scroll(to fraction: CGFloat) {
         guard isLoaded else { return }
         call("lexmdScroll(f)", ["f": Double(fraction)])
+    }
+
+    /// Reports how far the page is scrolled, from 0 to 1.
+    func readScrollFraction(_ completion: @escaping (Double) -> Void) {
+        guard isLoaded else { return }
+        let body = "var max = document.documentElement.scrollHeight - window.innerHeight; return max > 0 ? window.scrollY / max : 0"
+        call(body, [:]) { completion(($0 as? NSNumber)?.doubleValue ?? 0) }
     }
 
     func setScale(_ value: Double) {

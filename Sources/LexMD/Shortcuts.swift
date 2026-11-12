@@ -102,6 +102,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case find, findNext, findPrevious, findInFiles
     case goBack, goForward
     case bold, italic, strikethrough, inlineCode, link
+    case newFolder, renameItem, duplicateItem, moveToTrash
+    case closeTab, reopenClosedTab, showNextTab, showPreviousTab
 
     var id: String { rawValue }
 
@@ -116,6 +118,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .find, .findNext, .findPrevious, .findInFiles: .find
         case .toggleSidebar, .editorOnly, .split, .previewOnly, .expandAll, .collapseAll, .zoomIn, .zoomOut, .zoomReset: .view
         case .bold, .italic, .strikethrough, .inlineCode, .link: .format
+        case .newFolder, .renameItem, .duplicateItem, .moveToTrash, .closeTab, .reopenClosedTab: .file
+        case .showNextTab, .showPreviousTab: .navigate
         }
     }
 
@@ -146,6 +150,14 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .strikethrough: "Strikethrough"
         case .inlineCode: "Inline Code"
         case .link: "Link"
+        case .newFolder: "New Folder"
+        case .renameItem: "Rename"
+        case .duplicateItem: "Duplicate"
+        case .moveToTrash: "Move to Trash"
+        case .closeTab: "Close Tab"
+        case .reopenClosedTab: "Reopen Closed Tab"
+        case .showNextTab: "Show Next Tab"
+        case .showPreviousTab: "Show Previous Tab"
         }
     }
 
@@ -176,6 +188,14 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .strikethrough: "shift+cmd+x"
         case .inlineCode: "cmd+e"
         case .link: "cmd+k"
+        case .newFolder: "shift+cmd+n"
+        case .renameItem: ""
+        case .duplicateItem: ""
+        case .moveToTrash: ""
+        case .closeTab: "cmd+w"
+        case .reopenClosedTab: "shift+cmd+t"
+        case .showNextTab: "ctrl+tab"
+        case .showPreviousTab: "ctrl+shift+tab"
         }
         return Shortcut(string: value)
     }

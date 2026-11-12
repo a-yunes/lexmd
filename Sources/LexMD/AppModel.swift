@@ -23,7 +23,7 @@ final class AppModel {
 
     // Tree
     private(set) var rootURL: URL?
-    private(set) var tree: [FileNode] = [] {
+    var tree: [FileNode] = [] {
         didSet { updateDisplayTree() }
     }
     /// The tree as displayed: compacted when the setting is on, before filtering.
@@ -41,9 +41,9 @@ final class AppModel {
     }
 
     // Document
-    private(set) var currentFile: URL?
+    var currentFile: URL?
     private(set) var wordCount = 0
-    private(set) var saveError: String?
+    var saveError: String?
     private(set) var viewMode: ViewMode = .read
     private(set) var fontScale: Double = 1
     private(set) var recentFolders: [String] = []
@@ -63,8 +63,8 @@ final class AppModel {
     }
     var shortcutNote: String?
     private(set) var recentFiles: [String] = []
-    private(set) var history: [String] = []
-    private(set) var historyIndex = -1
+    var history: [String] = []
+    var historyIndex = -1
     @ObservationIgnored var isNavigatingHistory = false
 
     var compactFolders = true {
@@ -115,21 +115,23 @@ final class AppModel {
     let updates = UpdateService()
     var isOnboardingPresented = false
 
-    @ObservationIgnored private(set) var text = ""
-    @ObservationIgnored private var savedText = ""
+    @ObservationIgnored var text = ""
+    @ObservationIgnored var savedText = ""
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var renderTask: Task<Void, Never>?
     @ObservationIgnored private var scanTask: Task<Void, Never>?
     @ObservationIgnored private var rescanTask: Task<Void, Never>?
     @ObservationIgnored private var watcher: DirectoryWatcher?
     @ObservationIgnored private var pendingScrollReset = false
-    @ObservationIgnored private let defaults = UserDefaults.standard
+    @ObservationIgnored let defaults = UserDefaults.standard
     @ObservationIgnored var quickTask: Task<Void, Never>?
     @ObservationIgnored var quickKeyMonitor: Any?
     @ObservationIgnored var quickQueries: [QuickMode: String] = [:]
     @ObservationIgnored var transientHighlight = false
+    @ObservationIgnored let tabStore = TabStore()
+    @ObservationIgnored let sidebarFiles = SidebarFileState()
 
-    private enum Keys {
+    enum Keys {
         static let root = "rootPath"
         static let lastFile = "lastFile"
         static let expanded = "expanded"
@@ -143,6 +145,8 @@ final class AppModel {
         static let onboardingComplete = "onboardingComplete"
         static let recentFiles = "recentFiles"
         static let loadsRemoteContent = "loadsRemoteContent"
+        static let openTabs = "openTabs"
+        static let alwaysShowTabBar = "alwaysShowTabBar"
     }
 
     private init() {
@@ -188,7 +192,8 @@ final class AppModel {
         return "\(words) \(wordCount == 1 ? "word" : "words") · \(minutes) min read"
     }
 
-    private func updateDisplayTree() {
+    func updateDisplayTree() {
+        let tree = treeWithNewFolders(self.tree)
         displayTree = compactFolders ? FileScanner.compact(tree) : tree
         displayFolderIDs = FileScanner.folderIDs(in: displayTree)
     }
@@ -251,6 +256,7 @@ final class AppModel {
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else { return }
         setRoot(URL(fileURLWithPath: path, isDirectory: true))
+        if restoreTabs() { return }
         if let stored = defaults.string(forKey: Keys.lastFile) {
             let last = FileScanner.canonicalPath(stored)
             if last.hasPrefix(path + "/"), FileManager.default.fileExists(atPath: last) {
@@ -286,6 +292,7 @@ final class AppModel {
         guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { return }
         if isDir.boolValue {
             setRoot(URL(fileURLWithPath: path, isDirectory: true))
+            if tabStore.list.isEmpty { restoreTabs() }
             return
         }
         if let root = rootURL?.path, path.hasPrefix(root + "/") {
@@ -301,6 +308,7 @@ final class AppModel {
         let normalized = URL(fileURLWithPath: FileScanner.canonicalPath(url.path), isDirectory: true)
         if rootURL?.path != normalized.path {
             saveNow()
+            closeTabsForProjectChange()
             rootURL = normalized
             tree = []
             filter = ""
@@ -331,7 +339,7 @@ final class AppModel {
 
     func rescanSoon() { scheduleRescan() }
 
-    private func rescan() {
+    func rescan() {
         guard let root = rootURL else { return }
         isScanning = tree.isEmpty
         scanTask?.cancel()
@@ -407,7 +415,7 @@ final class AppModel {
     }
 
     /// Shows an alert as a sheet on the key window, or modally when there is none.
-    private func present(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+    func present(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         if let window = NSApp.keyWindow ?? NSApp.mainWindow {
             alert.beginSheetModal(for: window, completionHandler: completion)
         } else {
@@ -433,10 +441,11 @@ final class AppModel {
             return
         }
         guard path != currentFile?.path else { return }
+        if routeSelectionToTabs(path) { return }
         load(URL(fileURLWithPath: path))
     }
 
-    private func load(_ url: URL) {
+    func load(_ url: URL) {
         saveNow()
         guard let content = Self.read(url) else {
             NSSound.beep()
@@ -459,6 +468,7 @@ final class AppModel {
         render(debounce: false)
         defaults.set(url.path, forKey: Keys.lastFile)
         recordVisit(url.path)
+        tabDidLoad(url)
     }
 
     private static func read(_ url: URL) -> String? {
@@ -506,7 +516,7 @@ final class AppModel {
         render(debounce: false)
     }
 
-    private func render(debounce: Bool) {
+    func render(debounce: Bool) {
         renderTask?.cancel()
         let source = text
         let base = currentFile?.deletingLastPathComponent()

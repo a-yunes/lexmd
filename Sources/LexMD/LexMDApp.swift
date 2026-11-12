@@ -84,6 +84,7 @@ struct LexMDCommands: Commands {
         }
         CommandGroup(replacing: .newItem) {
             item(.newDocument, disabled: model.rootURL == nil) { model.newDocument() }
+            item(.newFolder, disabled: model.rootURL == nil) { model.newFolder(near: model.currentFile) }
             item(.open) { model.showOpenPanel() }
             item(.quickOpen, disabled: model.rootURL == nil) { model.toggleQuickSearch(mode: .files) }
             Menu("Open Recent") {
@@ -110,9 +111,20 @@ struct LexMDCommands: Commands {
             }
         }
         CommandGroup(replacing: .saveItem) {
+            item(.closeTab) { model.performCloseCommand() }
+            item(.reopenClosedTab, disabled: !model.canReopenClosedTab) { model.reopenClosedTab() }
+            Divider()
             item(.save) { model.saveNow() }
             Divider()
             item(.revealInFinder) { model.revealCurrentInFinder() }
+            item(.renameItem, disabled: model.currentFile == nil) { model.currentFile.map(model.beginRename) }
+            item(.duplicateItem, disabled: model.currentFile == nil) { model.currentFile.map(model.duplicateItem) }
+            item(.moveToTrash, disabled: model.currentFile == nil) { model.currentFile.map(model.confirmMoveToTrash) }
+        }
+        CommandGroup(before: .windowArrangement) {
+            item(.showPreviousTab, disabled: model.tabStore.list.count < 2) { model.showPreviousTab() }
+            item(.showNextTab, disabled: model.tabStore.list.count < 2) { model.showNextTab() }
+            Divider()
         }
         CommandGroup(before: .sidebar) {
             item(.toggleSidebar) { model.toggleSidebar() }

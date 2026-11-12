@@ -144,6 +144,18 @@ struct SidebarView: View {
                     }
                 }
                 .listStyle(.sidebar)
+                .contextMenu { SidebarBackgroundMenu() }
+                .dropDestination(for: URL.self) { urls, _ in model.moveItems(urls, into: root) }
+                .onKeyPress(.return) {
+                    guard model.sidebarFiles.renamingPath == nil, let path = model.selectedPath else { return .ignored }
+                    model.beginRename(URL(fileURLWithPath: path))
+                    return .handled
+                }
+                .onKeyPress(.delete, phases: .down) { press in
+                    guard press.modifiers == .command, let path = model.selectedPath else { return .ignored }
+                    model.confirmMoveToTrash(URL(fileURLWithPath: path))
+                    return .handled
+                }
                 .overlay {
                     if rows.isEmpty, !model.isScanning {
                         if model.filter.isEmpty {
@@ -248,7 +260,7 @@ struct FileRow: View {
                         .frame(width: 12)
                         .accessibilityHidden(true)
                     Label {
-                        CompactName(parents: node.parents, name: node.name)
+                        RenamableName(node: node, name: node.name)
                     } icon: {
                         Image(systemName: "folder")
                     }
@@ -266,12 +278,13 @@ struct FileRow: View {
                 }
                 RowMenu(url: node.url)
             }
+            .sidebarDragAndDrop(node)
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
         } else {
             HStack(spacing: 3) {
                 Color.clear.frame(width: 12)
                 Label {
-                    CompactName(parents: node.parents, name: node.displayName)
+                    RenamableName(node: node, name: node.displayName)
                 } icon: {
                     Image(systemName: "doc.text")
                 }
@@ -281,6 +294,7 @@ struct FileRow: View {
             .tag(node.id)
             .help(node.searchLabel)
             .contextMenu { RowMenu(url: node.url) }
+            .sidebarDragAndDrop(node)
         }
     }
 
@@ -328,6 +342,7 @@ struct RowMenu: View {
     let url: URL
 
     var body: some View {
+        FileActionMenuItems(url: url)
         Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         Button("Copy Path") {
             NSPasteboard.general.clearContents()
@@ -355,6 +370,7 @@ struct DetailView: View {
                 }
             }
             .animation(.easeOut(duration: 0.16), value: model.isFindBarVisible)
+            .safeAreaInset(edge: .top, spacing: 0) { DocumentTabBar() }
     }
 
     private var documentArea: some View {

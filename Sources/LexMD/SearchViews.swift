@@ -343,6 +343,7 @@ struct QuickSearchPanel: View {
             Spacer()
             KeyHint(keys: "↑↓", label: "Navigate")
             KeyHint(keys: "↩", label: "Open")
+            KeyHint(keys: "⌘↩", label: "New Tab")
             KeyHint(keys: "esc", label: "Close")
         }
         .padding(.horizontal, 16)
