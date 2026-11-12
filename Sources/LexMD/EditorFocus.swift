@@ -81,15 +81,16 @@ extension EditorController {
     /// Dims everything outside the caret's paragraph with rendering attributes, which are
     /// never stored in the text or saved.
     func updateFocusDimming(force: Bool = false) {
-        let length = (textView.string as NSString).length
-        guard isFocusModeEnabled, length > 0 else {
+        // Runs on every selection change: the storage's own string avoids copying the document.
+        guard isFocusModeEnabled, let string = textView.textStorage?.mutableString, string.length > 0 else {
             if focusState.paragraph != nil {
                 removeDimming()
                 focusState.paragraph = nil
             }
             return
         }
-        let paragraph = Self.focusParagraph(in: textView.string as NSString, at: textView.selectedRange().location)
+        let length = string.length
+        let paragraph = Self.focusParagraph(in: string, at: textView.selectedRange().location)
         guard force || focusState.isStale || paragraph != focusState.paragraph else { return }
         removeDimming()
         focusState.paragraph = paragraph
@@ -105,7 +106,7 @@ extension EditorController {
         if let layoutManager = textView.textLayoutManager, let content = layoutManager.textContentManager {
             layoutManager.removeRenderingAttribute(.foregroundColor, for: content.documentRange)
         } else if let layoutManager = textView.layoutManager {
-            let full = NSRange(location: 0, length: (textView.string as NSString).length)
+            let full = NSRange(location: 0, length: textView.textStorage?.length ?? 0)
             layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: full)
         }
     }
@@ -151,10 +152,12 @@ extension EditorController {
         }
     }
 
-    /// Scrolls so the caret line sits in the middle of the view.
+    /// Scrolls so the caret line sits in the middle of the view. A selection is left to the text
+    /// view, which keeps its moving end visible; centering its start would scroll that end away.
     func centerCaret() {
-        guard isTypewriterScrollingEnabled, let window = textView.window else { return }
-        let caret = NSRange(location: textView.selectedRange().location, length: 0)
+        let selection = textView.selectedRange()
+        guard isTypewriterScrollingEnabled, selection.length == 0, let window = textView.window else { return }
+        let caret = NSRange(location: selection.location, length: 0)
         let screenRect = textView.firstRect(forCharacterRange: caret, actualRange: nil)
         guard screenRect != .zero else { return }
         let rect = textView.convert(window.convertFromScreen(screenRect), from: nil)

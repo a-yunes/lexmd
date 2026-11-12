@@ -111,6 +111,24 @@ final class OutlineModel {
     /// The heading id the preview last reported.
     @ObservationIgnored var previewSlug: String?
     @ObservationIgnored private var headingCache: (source: String, headings: [HeadingInfo])?
+    /// Link completion candidates for the project's files, rebuilt only when the files change.
+    @ObservationIgnored private var candidateCache: (key: CandidateKey, candidates: [EditorCompletion.Candidate])?
+
+    struct CandidateKey: Hashable {
+        enum Kind: Hashable { case path(image: Bool), wiki }
+        var kind: Kind
+        var structureVersion: Int
+        var document: String?
+        var root: String
+    }
+
+    /// The cached candidates for `key`, or the ones `make` builds, cached for the next keystroke.
+    func candidates(for key: CandidateKey, make: () -> [EditorCompletion.Candidate]) -> [EditorCompletion.Candidate] {
+        if let candidateCache, candidateCache.key == key { return candidateCache.candidates }
+        let candidates = make()
+        candidateCache = (key, candidates)
+        return candidates
+    }
 
     func apply(_ analysis: OutlineAnalysis, path: String) {
         if documentPath != path { currentHeading = nil }
@@ -361,12 +379,18 @@ extension AppModel {
         let root = rootURL?.path ?? folder
         switch context.kind {
         case .path(let image):
-            var candidates: [EditorCompletion.Candidate] = []
-            for path in snapshot.markdownPaths where path != current {
-                candidates.append(fileCandidate(path, kind: .document, folder: folder, root: root, group: image ? 1 : 0))
-            }
-            for path in snapshot.imagePaths {
-                candidates.append(fileCandidate(path, kind: .image, folder: folder, root: root, group: image ? 0 : 1))
+            let key = OutlineModel.CandidateKey(
+                kind: .path(image: image), structureVersion: snapshot.structureVersion, document: current, root: root
+            )
+            let candidates = outline.candidates(for: key) {
+                var candidates: [EditorCompletion.Candidate] = []
+                for path in snapshot.markdownPaths where path != current {
+                    candidates.append(fileCandidate(path, kind: .document, folder: folder, root: root, group: image ? 1 : 0))
+                }
+                for path in snapshot.imagePaths {
+                    candidates.append(fileCandidate(path, kind: .image, folder: folder, root: root, group: image ? 0 : 1))
+                }
+                return candidates
             }
             var query = context.query.removingPercentEncoding ?? context.query
             while query.hasPrefix("./") { query.removeFirst(2) }
@@ -381,15 +405,18 @@ extension AppModel {
             return headingSuggestions(in: path, snapshot: snapshot, query: context.query, insertTitle: false)
 
         case .wiki:
-            let candidates = snapshot.markdownPaths.filter { $0 != current }.map { path -> EditorCompletion.Candidate in
-                let name = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
-                let relative = WikiLinkResolver.stem(LinkPaths.relative(path, from: root))
-                let insertion = snapshot.resolver.isAmbiguous(path) ? relative : name
-                let parent = (relative as NSString).deletingLastPathComponent
-                return EditorCompletion.Candidate(
-                    item: CompletionItem(id: path, kind: .document, title: name, detail: parent, insertion: insertion),
-                    keys: [name, relative], weight: -LinkPaths.relative(path, from: folder).count
-                )
+            let key = OutlineModel.CandidateKey(kind: .wiki, structureVersion: snapshot.structureVersion, document: current, root: root)
+            let candidates = outline.candidates(for: key) {
+                snapshot.markdownPaths.filter { $0 != current }.map { path -> EditorCompletion.Candidate in
+                    let name = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
+                    let relative = WikiLinkResolver.stem(LinkPaths.relative(path, from: root))
+                    let insertion = snapshot.resolver.isAmbiguous(path) ? relative : name
+                    let parent = (relative as NSString).deletingLastPathComponent
+                    return EditorCompletion.Candidate(
+                        item: CompletionItem(id: path, kind: .document, title: name, detail: parent, insertion: insertion),
+                        keys: [name, relative], weight: -LinkPaths.relative(path, from: folder).count
+                    )
+                }
             }
             return EditorCompletion.rank(context.query, candidates)
 

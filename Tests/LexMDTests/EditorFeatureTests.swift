@@ -394,6 +394,32 @@ struct EditorFeatureTests {
         #expect(EditorController.centeredOffset(caretMidY: 4990, visibleHeight: 600, documentHeight: 5000, topInset: 0) == 4400)
     }
 
+    // MARK: Undo and reload
+
+    @Test func replacingTheTextDropsUndoStepsForTheOldText() throws {
+        let harness = Harness("Hello world\n", selection: NSRange(location: 11, length: 0))
+        harness.editor.textView.insertText(" and more", replacementRange: harness.selection)
+        let undoManager = try #require(harness.editor.textView.undoManager)
+        #expect(undoManager.canUndo)
+        harness.editor.replaceText("Rewritten elsewhere\n")
+        #expect(!undoManager.canUndo)
+        harness.undo()
+        #expect(harness.text == "Rewritten elsewhere\n")
+    }
+
+    // MARK: Input methods
+
+    @Test func pasteWhileComposingIsLeftToTheTextView() {
+        let harness = Harness("Text\n", selection: NSRange(location: 4, length: 0))
+        let view = harness.editor.textView
+        view.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        #expect(view.hasMarkedText())
+        let board = Self.pasteboard()
+        board.setString("a\tb\nc\td\n", forType: .string)
+        #expect(!harness.editor.paste(from: board))
+        #expect(harness.text == "Textか\n")
+    }
+
     // MARK: Spelling
 
     @Test func spellingSkipsCodeURLsAndFrontMatter() {

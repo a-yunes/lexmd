@@ -201,8 +201,8 @@ struct TableLocation {
     var column: Int
 
     /// Finds the table around `location`, skipping front matter, fenced code, and comments.
-    static func find(in string: String, at location: Int, blocks: MarkdownBlocks) -> TableLocation? {
-        let ns = string as NSString
+    /// `blocks` is only consulted once a table is found.
+    static func find(in ns: NSString, at location: Int, blocks: () -> MarkdownBlocks) -> TableLocation? {
         guard location <= ns.length else { return nil }
         func lineRange(at index: Int) -> NSRange {
             ns.lineRange(for: NSRange(location: index, length: 0))
@@ -240,7 +240,7 @@ struct TableLocation {
         let first = lineRanges[start]
         let last = lineRanges[lineRanges.count - 1]
         let range = NSRange(location: first.location, length: last.location + (texts.last! as NSString).length - first.location)
-        let blocked = blocks.items.contains { NSIntersectionRange($0.range, range).length > 0 }
+        let blocked = blocks().items.contains { NSIntersectionRange($0.range, range).length > 0 }
         guard !blocked else { return nil }
         caretLine = lineRanges[index]
         let offset = location - caretLine.location
@@ -298,14 +298,16 @@ extension EditorController {
         textView.setSelectedRange(NSRange(location: found.range.location + NSMaxRange(cell), length: 0))
     }
 
+    /// The table around `location`. Runs for every Tab, so it reads the storage without copying
+    /// it and reuses the highlighter's blocks instead of rescanning the document.
     func tableLocation(at location: Int) -> TableLocation? {
-        let string = textView.string
-        return TableLocation.find(in: string, at: location, blocks: MarkdownHighlighter.blocks(in: string))
+        guard let string = textView.textStorage?.mutableString else { return nil }
+        return TableLocation.find(in: string, at: location) { currentBlocks }
     }
 
     /// Replaces only the part of the table that changed, as one undoable edit.
     private func applyTableText(_ text: String, replacing range: NSRange, actionName: String) {
-        let old = (textView.string as NSString).substring(with: range)
+        guard let old = textView.textStorage?.mutableString.substring(with: range) else { return }
         guard old != text else { return }
         let a = Array(old.utf16), b = Array(text.utf16)
         var prefix = 0

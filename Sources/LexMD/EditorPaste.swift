@@ -288,19 +288,21 @@ extension EditorController {
 
     private var isInCode: Bool {
         let location = textView.selectedRange().location
-        return (blocks ?? MarkdownHighlighter.blocks(in: textView.string)).items.contains {
+        return currentBlocks.items.contains {
             $0.kind != .comment && $0.range.location < location && location < NSMaxRange($0.range)
         }
     }
 
-    /// Handles Paste for images, URLs over a selection, and tables. Returns false to paste normally.
+    /// Handles Paste for images, URLs over a selection, and tables. Returns false to paste normally,
+    /// which includes pasting while an input method is composing text.
     func paste(from pasteboard: NSPasteboard, date: Date = Date()) -> Bool {
+        guard !textView.hasMarkedText() else { return false }
         let range = textView.selectedRange()
         let files = ImageStore.imageFiles(on: pasteboard)
         if !files.isEmpty { return insertImages(files: files, over: range) }
         if let text = pasteboard.string(forType: .string) {
             guard !isInCode else { return false }
-            let selected = (textView.string as NSString).substring(with: range)
+            let selected = textView.textStorage?.mutableString.substring(with: range) ?? ""
             if !selected.isEmpty, !selected.contains("\n"), SmartPaste.url(in: selected) == nil,
                let url = SmartPaste.url(in: text) {
                 insert(SmartPaste.link(text: selected, url: url), over: range, actionName: "Paste Link")

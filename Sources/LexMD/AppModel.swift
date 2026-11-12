@@ -585,6 +585,7 @@ final class AppModel {
         text = disk
         savedText = disk
         editor.replaceText(disk)
+        if isFindBarVisible { refreshFind(scroll: false) }
         render(debounce: false)
     }
 

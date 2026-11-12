@@ -3,12 +3,24 @@ import AppKit
 /// Lightweight regex-based Markdown styling for the source editor.
 @MainActor
 enum MarkdownHighlighter {
+    private struct FontKey: Hashable {
+        var size: CGFloat
+        var bold: Bool
+        var italic: Bool
+    }
+
+    /// Fonts already made, since highlighting asks for one per heading and emphasis span.
+    private static var fonts: [FontKey: NSFont] = [:]
+
     static func font(size: CGFloat, bold: Bool = false, italic: Bool = false) -> NSFont {
+        let key = FontKey(size: size, bold: bold, italic: italic)
+        if let font = fonts[key] { return font }
         var font = NSFont.monospacedSystemFont(ofSize: size, weight: bold ? .semibold : .regular)
         if italic {
             let descriptor = font.fontDescriptor.withSymbolicTraits(.italic)
             font = NSFont(descriptor: descriptor, size: size) ?? font
         }
+        fonts[key] = font
         return font
     }
 
@@ -94,11 +106,15 @@ enum MarkdownHighlighter {
     static func highlight(
         _ storage: NSTextStorage, size: CGFloat, in limit: NSRange? = nil, blocks known: MarkdownBlocks? = nil
     ) -> MarkdownBlocks {
-        let string = storage.string
         let full = NSRange(location: 0, length: storage.length)
         let range = limit.map { NSIntersectionRange($0, full) } ?? full
-        let blocks = known ?? Self.blocks(in: string)
+        // Patterns run over just the restyled text. Searches never look outside their range,
+        // so matching a copy of it finds the same matches, without copying the whole document.
+        let string = range == full ? storage.string : storage.mutableString.substring(with: range)
+        let blocks = known ?? Self.blocks(in: range == full ? string : storage.string)
         guard full.length > 0 else { return blocks }
+        let offset = range.location
+        let local = NSRange(location: 0, length: range.length)
 
         storage.beginEditing()
         defer { storage.endEditing() }
@@ -130,8 +146,8 @@ enum MarkdownHighlighter {
         }
 
         func each(_ regex: NSRegularExpression, _ body: (NSTextCheckingResult) -> Void) {
-            regex.enumerateMatches(in: string, range: range) { m, _, _ in
-                guard let m, !isProtected(m.range) else { return }
+            regex.enumerateMatches(in: string, range: local) { m, _, _ in
+                guard let m = m?.adjustingRanges(offset: offset), !isProtected(m.range) else { return }
                 body(m)
             }
         }
@@ -164,8 +180,8 @@ enum MarkdownHighlighter {
         }
 
         each(tablePipe) { m in
-            pipe.enumerateMatches(in: string, range: m.range) { p, _, _ in
-                if let p { color(p.range, markerColor) }
+            pipe.enumerateMatches(in: string, range: NSRange(location: m.range.location - offset, length: m.range.length)) { p, _, _ in
+                if let p { color(NSRange(location: p.range.location + offset, length: p.range.length), markerColor) }
             }
         }
 

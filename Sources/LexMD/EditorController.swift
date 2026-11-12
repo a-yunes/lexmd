@@ -137,6 +137,8 @@ final class EditorController: NSObject, NSTextViewDelegate {
     // MARK: Content
 
     func load(_ text: String) {
+        // The whole text is restyled below; skip tracking the replacement as an edit.
+        needsFullHighlight = true
         textView.string = text
         highlight(full: true)
         textView.undoManager?.removeAllActions()
@@ -146,11 +148,15 @@ final class EditorController: NSObject, NSTextViewDelegate {
         scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
+    /// Shows new text (reloaded from disk or restored) in place, keeping the caret and scroll position.
     func replaceText(_ text: String) {
         let selection = textView.selectedRange()
         let origin = scrollView.contentView.bounds.origin
+        needsFullHighlight = true
         textView.string = text
         highlight(full: true)
+        // Undo steps recorded against the old text would apply to the wrong ranges of the new one.
+        textView.undoManager?.removeAllActions()
         let length = (text as NSString).length
         textView.setSelectedRange(NSRange(location: min(selection.location, length), length: 0))
         scrollView.contentView.scroll(to: origin)
@@ -350,20 +356,46 @@ final class EditorController: NSObject, NSTextViewDelegate {
     /// Records each text edit so the next highlight restyles only the edited paragraphs.
     /// Edits that can open, close, or move a multi-line block fall back to a full pass.
     @objc private func storageDidProcessEditing(_ notification: Notification) {
-        guard let storage = textView.textStorage, storage.editedMask.contains(.editedCharacters) else { return }
+        guard let storage = textView.textStorage, storage.editedMask.contains(.editedCharacters),
+              !needsFullHighlight else { return }
         let edited = storage.editedRange
         let delta = storage.changeInLength
         let old = NSRange(location: edited.location, length: max(0, edited.length - delta))
-        let lines = (storage.string as NSString).lineRange(for: Self.withNextLine(edited, length: storage.length))
-        guard !needsFullHighlight, pendingEdit == nil, var blocks, !blocks.touchesBoundary(old),
-              !MarkdownBlocks.linesHaveDelimiter((storage.string as NSString).substring(with: lines)) else {
+        // The storage's own string: bridging `storage.string` would copy the whole document.
+        let text = storage.mutableString
+        let lines = text.lineRange(for: Self.withNextLine(edited, length: text.length))
+        guard var blocks, !blocks.touchesBoundary(old),
+              !MarkdownBlocks.linesHaveDelimiter(text.substring(with: lines)) else {
             needsFullHighlight = true
             pendingEdit = nil
             return
         }
         blocks.shift(replacing: old, delta: delta)
         self.blocks = blocks
-        pendingEdit = edited
+        // Several edits before one highlight (input method composition, multi-range edits)
+        // restyle the span that covers them all.
+        pendingEdit = pendingEdit.map { Self.union($0, movedBy: old, edited: edited) } ?? edited
+    }
+
+    /// The range covering `pending` (an earlier edit, adjusted for the later one) and `edited`,
+    /// where the later edit replaced `old` with the text now at `edited`.
+    static func union(_ pending: NSRange, movedBy old: NSRange, edited: NSRange) -> NSRange {
+        let delta = edited.length - old.length
+        func moved(_ location: Int) -> Int {
+            if location <= old.location { return location }
+            if location >= NSMaxRange(old) { return location + delta }
+            return NSMaxRange(edited)
+        }
+        let start = min(moved(pending.location), edited.location)
+        let end = max(moved(NSMaxRange(pending)), NSMaxRange(edited))
+        return NSRange(location: start, length: end - start)
+    }
+
+    /// Front matter, fenced code, and comments in the current text: the highlighter's blocks
+    /// while they are in step with the text, otherwise a fresh scan.
+    var currentBlocks: MarkdownBlocks {
+        if let blocks, !needsFullHighlight { return blocks }
+        return MarkdownHighlighter.blocks(in: textView.string)
     }
 
     /// Extends an edited range by one character so a line split by an inserted newline
@@ -375,10 +407,13 @@ final class EditorController: NSObject, NSTextViewDelegate {
 
     private func highlight(full: Bool) {
         guard let storage = textView.textStorage, !textView.hasMarkedText() else { return }
-        if !full, !needsFullHighlight, let edit = pendingEdit {
-            let ns = storage.string as NSString
-            let range = ns.paragraphRange(for: Self.withNextLine(edit, length: ns.length))
-            MarkdownHighlighter.highlight(storage, size: fontSize, in: range, blocks: blocks)
+        if !full, !needsFullHighlight {
+            // Without a pending edit, nothing changed since the last pass.
+            if let edit = pendingEdit {
+                let ns = storage.mutableString
+                let range = ns.paragraphRange(for: Self.withNextLine(edit, length: ns.length))
+                MarkdownHighlighter.highlight(storage, size: fontSize, in: range, blocks: blocks)
+            }
         } else {
             blocks = MarkdownHighlighter.highlight(storage, size: fontSize)
         }
