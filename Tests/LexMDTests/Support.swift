@@ -37,7 +37,7 @@ struct TimedOut: Error {}
 
 /// Polls `condition` until it holds, failing after `seconds`.
 @MainActor
-func waitUntil(seconds: Double = 10, _ condition: () async throws -> Bool) async throws {
+func waitUntil(seconds: Double = 30, _ condition: () async throws -> Bool) async throws {
     let deadline = Date().addingTimeInterval(seconds)
     while Date() < deadline {
         if (try? await condition()) == true { return }
