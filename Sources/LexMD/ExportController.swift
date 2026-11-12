@@ -131,7 +131,13 @@ enum Exporter {
         operation.showsProgressPanel = true
         operation.printPanel.options.formUnion([.showsCopies, .showsPageRange, .showsPaperSize, .showsOrientation, .showsScaling, .showsPreview])
         // Cancelling the panel is not an error; the print system reports its own failures.
-        _ = await run(operation, for: window ?? renderer.window)
+        // Without a window to attach to, the panel is app-modal; a sheet on the offscreen window
+        // would never be seen or finish.
+        if let window {
+            _ = await run(operation, for: window)
+        } else {
+            _ = operation.run()
+        }
     }
 
     private static func run(_ operation: NSPrintOperation, for window: NSWindow) async -> Bool {
@@ -193,10 +199,7 @@ enum Exporter {
         let katex = result["katex"] as? String ?? ""
         let families = Set(result["fonts"] as? [String] ?? [])
         let math = katex.isEmpty ? "" : await runDetached { embedKaTeXFonts(katex, families: families) }
-        var html = body
-        for (index, value) in replacements.enumerated() {
-            html = html.replacingOccurrences(of: "\(nonce)\(index);", with: MarkdownHTML.escape(value))
-        }
+        let html = replacingTokens(in: body, nonce: nonce, with: replacements)
         let style = withoutAppURLs([css, math, exportCSS].joined(separator: "\n")).replacingOccurrences(of: "</", with: "<\\/")
         let page = """
         <!doctype html>
@@ -221,6 +224,26 @@ enum Exporter {
 
         """
         return HTMLExport(html: page, linkedImages: linked)
+    }
+
+    /// Replaces each `<nonce><index>;` token with its value, escaped for an attribute, in one pass.
+    nonisolated static func replacingTokens(in html: String, nonce: String, with values: [String]) -> String {
+        var out = ""
+        out.reserveCapacity(html.utf8.count)
+        var rest = html[...]
+        while let token = rest.firstRange(of: nonce) {
+            out += rest[..<token.lowerBound]
+            let after = rest[token.upperBound...]
+            let digits = after.prefix { $0.isASCII && $0.isNumber }
+            if after.dropFirst(digits.count).first == ";", let index = Int(digits), values.indices.contains(index) {
+                out += MarkdownHTML.escape(values[index])
+                rest = after.dropFirst(digits.count + 1)
+            } else {
+                out += rest[token]
+                rest = after
+            }
+        }
+        return out + rest
     }
 
     static let htmlPolicy = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; "

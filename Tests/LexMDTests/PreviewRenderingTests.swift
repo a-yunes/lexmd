@@ -216,6 +216,37 @@ struct MarkdownRenderingTests {
         }
     }
 
+    @Test func frontMatterBoundaries() {
+        let crlf = MarkdownHTML.render("---\r\ntitle: A\r\ntags: [x]\r\n---\r\nBody\r\n")
+        #expect(crlf.hasPrefix("<div class=\"properties\">"))
+        #expect(crlf.contains("<td>A</td>"))
+        #expect(crlf.contains("<p>Body</p>"))
+        // The closing line may carry spaces; an empty block falls back to source.
+        #expect(MarkdownHTML.render("---\n---  \nBody").hasPrefix("<pre class=\"frontmatter\"><code></code></pre>\n<p>Body</p>"))
+        #expect(MarkdownHTML.render("---\ntitle: A\n---").hasPrefix("<div class=\"properties\">"))
+        // Without a closing line, or with only two lines, there is none.
+        for source in ["---\n---", "---\ntitle: A\n", "---\ntitle: A\n--- x\nBody", "---"] {
+            let html = MarkdownHTML.render(source)
+            #expect(!html.contains("properties") && !html.contains("frontmatter"), "\(source)")
+        }
+        // Text after the block keeps its lines and line endings.
+        #expect(MarkdownHTML.render("---\na: b\n---\nOne\n\nTwo $x$\n").hasSuffix("<p>One</p>\n<p>Two <span class=\"lexmd-math\" data-tex=\"x\">$x$</span></p>\n"))
+    }
+
+    @Test func scanningReusesItsParseWhenNothingIsReplaced() {
+        #expect(MarkdownExtensions("Costs $5 and `$x$` in code.").document != nil)
+        #expect(MarkdownExtensions("Undefined[^x] note.").document != nil)
+        #expect(MarkdownExtensions("Math $x$.").document == nil)
+        #expect(MarkdownExtensions("Plain text.").document == nil)
+        #expect(MarkdownHTML.render("Costs $5 and `$x$`.") == "<p>Costs $5 and <code>$x$</code>.</p>\n")
+    }
+
+    @Test func libraryMarkersAreFoundByBytes() {
+        #expect(PreviewController.contains("<p>é</p><div class=\"lexmd-diagram\">", "class=\"lexmd-diagram\""))
+        #expect(!PreviewController.contains("<p>class=&quot;lexmd-math</p>", "class=\"lexmd-math"))
+        #expect(!PreviewController.contains("", "x"))
+    }
+
     // MARK: Vendor files
 
     @Test func vendorRouteStaysInsideTheVendorFolder() throws {

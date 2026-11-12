@@ -22,6 +22,18 @@ extension PreviewTemplate {
   var pending = [];
   var near = new Set();
   var timer = null;
+  var deadline = 0, budgetOpen = false;
+
+  // One budget for everything a render inserts: it starts with the first block and ends once
+  // the render's script has returned.
+  function budgetEnd() {
+    if (!budgetOpen) {
+      budgetOpen = true;
+      deadline = performance.now() + BUDGET_MS;
+      Promise.resolve().then(function () { budgetOpen = false; });
+    }
+    return deadline;
+  }
 
   function remember(key, value) {
     cache.delete(key);
@@ -73,7 +85,7 @@ extension PreviewTemplate {
   }
 
   function diagram(src) {
-    if (typeof pele === 'undefined') return { error: 'The diagram renderer is not available.' };
+    if (typeof pele === 'undefined') return { error: 'The diagram renderer is not available.', unavailable: true };
     try {
       var result = pele.render(src, {
         fontFamily: FONT,
@@ -113,7 +125,11 @@ extension PreviewTemplate {
       var code = el.querySelector('pre code');
       if (!code) return;
       var src = code.textContent;
-      var entry = cache.get('d' + src) || remember('d' + src, diagram(src));
+      var entry = cache.get('d' + src);
+      if (!entry) {
+        entry = diagram(src);
+        if (!entry.unavailable) remember('d' + src, entry);
+      }
       if (entry.node) {
         var view = document.createElement('div');
         view.className = 'lexmd-diagram-view';
@@ -160,9 +176,21 @@ extension PreviewTemplate {
     if (timer === null && pending.length) timer = setTimeout(pump, 0);
   }
 
+  // Drops queued elements whose blocks have since been replaced, and stops observing them.
+  function prune() {
+    pending = pending.filter(function (el) {
+      if (el.isConnected) return true;
+      el.__lexmdPending = false;
+      near.delete(el);
+      if (observer) observer.unobserve(el);
+      return false;
+    });
+  }
+
   // Renders in short slices, nearest the viewport first, so long documents stay responsive.
   function pump() {
     timer = null;
+    prune();
     var start = performance.now();
     while (pending.length && performance.now() - start < SLICE_MS) {
       var index = 0;
@@ -178,25 +206,25 @@ extension PreviewTemplate {
   }
 
   // Called for each block the preview inserts. Cached results apply at once; new ones render
-  // within a small budget, and the rest are queued.
+  // within a small budget shared by the whole render, and the rest are queued.
   window.lexmdEnhance = function (node) {
     if (node.nodeType !== 1) return;
     var found = node.matches(SELECTOR) ? [node] : Array.prototype.slice.call(node.querySelectorAll(SELECTOR));
     if (!found.length) return;
-    var deadline = performance.now() + BUDGET_MS;
+    var end = budgetEnd();
     found.forEach(function (el) {
       if (el.__lexmdDone || el.__lexmdPending) return;
-      if (isCached(el) || performance.now() < deadline) { renderOne(el); return; }
+      if (isCached(el) || performance.now() < end) { renderOne(el); return; }
       el.__lexmdPending = true;
       pending.push(el);
       if (observer) observer.observe(el);
     });
-    pending = pending.filter(function (el) { return el.isConnected; });
     schedule();
   };
 
   // Renders everything still queued, for callers that need the finished document.
   window.lexmdRenderAll = function () {
+    prune();
     var queue = pending;
     pending = [];
     near.clear();

@@ -37,11 +37,14 @@ enum PreviewTemplate {
     return node.nodeType === 1 ? node.outerHTML : node.textContent;
   }
 
+  // A block that fails to enhance still shows, and the blocks after it still render.
   function prepare(node) {
     if (node.nodeType !== 1) return;
-    var codes = node.matches && node.matches('pre code') ? [node] : node.querySelectorAll('pre code[class*="language-"]');
-    for (var i = 0; i < codes.length; i++) highlight(codes[i]);
-    if (window.lexmdEnhance) window.lexmdEnhance(node);
+    try {
+      var codes = node.matches && node.matches('pre code') ? [node] : node.querySelectorAll('pre code[class*="language-"]');
+      for (var i = 0; i < codes.length; i++) highlight(codes[i]);
+      if (window.lexmdEnhance) window.lexmdEnhance(node);
+    } catch (e) {}
   }
 
   // Patch only the top-level blocks that changed so images and scroll position stay put.

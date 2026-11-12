@@ -154,6 +154,15 @@ struct ExportTests {
         #expect(!smallHTML.contains("data:image/png"))
     }
 
+    @Test func resourceTokensAreReplacedInOnePass() {
+        let nonce = "lexmd-res-N-"
+        let values = (0...10).map { "v\($0)" } + ["a\"b&c"]
+        let html = "<img src=\"\(nonce)1;\"><img src=\"\(nonce)10;\"><a href=\"\(nonce)11;\">x</a> \(nonce)99; \(nonce)x; \(nonce)"
+        #expect(Exporter.replacingTokens(in: html, nonce: nonce, with: values)
+            == "<img src=\"v1\"><img src=\"v10\"><a href=\"a&quot;b&amp;c\">x</a> \(nonce)99; \(nonce)x; \(nonce)")
+        #expect(Exporter.replacingTokens(in: "plain", nonce: nonce, with: values) == "plain")
+    }
+
     @Test func relativePaths() {
         let folder = URL(fileURLWithPath: "/tmp/LexMD Export/docs", isDirectory: true)
         #expect(Exporter.relativePath(from: folder, to: URL(fileURLWithPath: "/tmp/LexMD Export/docs/a b.png")) == "a%20b.png")

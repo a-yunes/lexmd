@@ -33,19 +33,22 @@ package struct MarkdownExtensions {
     package private(set) var itemRanges: [Range<Int>] = []
     /// Referenced footnotes in numbering order.
     package private(set) var footnotes: [Footnote] = []
+    /// The parse of `source` when scanning parsed it and replaced nothing, so it need not be parsed again.
+    package private(set) var document: Document?
 
     package static let tokenStart: Unicode.Scalar = "\u{E000}"
     package static let tokenEnd: Unicode.Scalar = "\u{E001}"
 
     package init(_ source: String, footnotes allowFootnotes: Bool = true) {
         self.source = source
-        let mayHaveMath = source.contains("$")
-        let mayHaveFootnotes = allowFootnotes && source.contains("[^")
+        let mayHaveMath = source.utf8.contains(0x24)
+        let mayHaveFootnotes = allowFootnotes && Self.containsFootnoteMarker(source.utf8)
         guard mayHaveMath || mayHaveFootnotes else { return }
 
         let bytes = Array(source.utf8)
         let lineStarts = Self.lineStarts(bytes)
-        var skip = Self.protectedRanges(source, bytes: bytes, lineStarts: lineStarts)
+        let parsed = Document(parsing: source)
+        var skip = Self.protectedRanges(parsed, bytes: bytes, lineStarts: lineStarts)
         var definitions: [String: Footnote] = [:]
         var blanked: [Range<Int>] = []
         if mayHaveFootnotes {
@@ -111,7 +114,19 @@ package struct MarkdownExtensions {
         }
         if !items.isEmpty || !blanked.isEmpty {
             self.source = String(decoding: out, as: UTF8.self)
+        } else {
+            document = parsed
         }
+    }
+
+    /// Whether the text holds `[^`.
+    private static func containsFootnoteMarker(_ utf8: String.UTF8View) -> Bool {
+        var previous: UInt8 = 0
+        for byte in utf8 {
+            if byte == 0x5E, previous == 0x5B { return true }
+            previous = byte
+        }
+        return false
     }
 
     // MARK: Tokens
@@ -281,9 +296,9 @@ package struct MarkdownExtensions {
     }
 
     /// Byte ranges of code and raw HTML, where extension syntax is left alone.
-    private static func protectedRanges(_ source: String, bytes: [UInt8], lineStarts: [Int]) -> [Range<Int>] {
+    private static func protectedRanges(_ document: Document, bytes: [UInt8], lineStarts: [Int]) -> [Range<Int>] {
         var collector = ProtectedRangeCollector()
-        collector.visit(Document(parsing: source))
+        collector.visit(document)
         func offset(_ location: SourceLocation) -> Int {
             let line = min(max(location.line, 1), lineStarts.count)
             return min(lineStarts[line - 1] + max(location.column - 1, 0), bytes.count)

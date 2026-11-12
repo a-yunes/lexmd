@@ -29,10 +29,15 @@ final class PreviewController: NSObject, WKNavigationDelegate {
 
     private var isLoaded = false
     private var isLoadingTemplate = false
+    /// The latest template load; callbacks for loads it superseded are ignored.
+    private var templateNavigation: WKNavigation?
+    private var templateRetries = 0
     private var lastHTML = ""
     private var lastBase: URL?
     private var pendingReset = false
-    private var pendingHeading: String?
+    /// True from `render` until the markup reaches the page.
+    private var hasNewRender = false
+    private var pendingHeading: (id: String, afterRender: Bool)?
     private var scale: Double = 1
     /// Scroll position (0...1) to apply after the next render, used when switching tabs.
     var pendingScrollFraction: Double?
@@ -76,7 +81,7 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         isLoaded = false
         isLoadingTemplate = true
         pageLibraries = injectedLibraries
-        webView.loadHTMLString(PreviewTemplate.html(allowsRemoteContent: allowsRemoteContent), baseURL: Self.pageURL)
+        templateNavigation = webView.loadHTMLString(PreviewTemplate.html(allowsRemoteContent: allowsRemoteContent), baseURL: Self.pageURL)
     }
 
     /// Lets documents load images and media from the web. The page reloads to apply it.
@@ -90,6 +95,7 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         let baseChanged = baseURL != lastBase
         lastHTML = html
         lastBase = baseURL
+        hasNewRender = true
         pendingReset = pendingReset || resetScroll || baseChanged
         guard isLoaded else { return }
         flush()
@@ -99,17 +105,20 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         let base = lastBase.flatMap { DocumentSchemeHandler.url(for: $0)?.absoluteString } ?? ""
         let reset = pendingReset
         pendingReset = false
+        // A page load re-sends the last markup; scrolling meant for the next document waits for it.
+        let isNewRender = hasNewRender
+        hasNewRender = false
         loadLibraries(for: lastHTML)
         call("lexmdRender(html, base, reset)", ["html": lastHTML, "base": base, "reset": reset])
-        if let id = pendingHeading {
+        if let heading = pendingHeading, isNewRender || !heading.afterRender {
             pendingHeading = nil
-            call("lexmdReveal(id, false)", ["id": id])
+            call("lexmdReveal(id, false)", ["id": heading.id])
         }
         if highlight != nil || highlightApplied {
             applyHighlight(scroll: Date() < highlightScrollUntil)
             highlightScrollUntil = .distantPast
         }
-        if let fraction = pendingScrollFraction {
+        if isNewRender, let fraction = pendingScrollFraction {
             pendingScrollFraction = nil
             call("lexmdScroll(f)", ["f": fraction])
         }
@@ -119,13 +128,24 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     /// world (never loaded by the page) when a document first needs them, then kept as user
     /// scripts for later page loads. Calls into the page run in order, so rendering sees them.
     private func loadLibraries(for html: String) {
-        for (index, library) in Self.libraries.enumerated() where !pageLibraries.contains(index) && html.contains(library.0) {
+        for (index, library) in Self.libraries.enumerated() where !pageLibraries.contains(index) && Self.contains(html, library.0) {
             guard let source = library.1 else { continue }
             pageLibraries.insert(index)
             if injectedLibraries.insert(index).inserted {
                 userContent.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Self.world))
             }
             webView.evaluateJavaScript(source, in: nil, in: Self.world, completionHandler: nil)
+        }
+    }
+
+    /// A byte search, much cheaper on a large page than `String.contains`, which compares characters.
+    nonisolated static func contains(_ text: String, _ marker: String) -> Bool {
+        var text = text, marker = marker
+        return text.withUTF8 { haystack in
+            marker.withUTF8 { needle in
+                guard let base = haystack.baseAddress, let pattern = needle.baseAddress else { return needle.isEmpty }
+                return memmem(base, haystack.count, pattern, needle.count) != nil
+            }
         }
     }
 
@@ -164,7 +184,7 @@ final class PreviewController: NSObject, WKNavigationDelegate {
 
     /// Scrolls a heading to the top, now or (`afterRender`) once the next document has rendered.
     func revealHeading(_ id: String, smooth: Bool, afterRender: Bool = false) {
-        guard !afterRender, isLoaded else { pendingHeading = id; return }
+        guard !afterRender, isLoaded else { pendingHeading = (id, afterRender); return }
         call("lexmdReveal(id, smooth)", ["id": id, "smooth": smooth])
     }
 
@@ -206,6 +226,10 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     // MARK: WKNavigationDelegate
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard isLoadingTemplate, templateNavigation == nil || navigation === templateNavigation else { return }
+        templateNavigation = nil
+        isLoadingTemplate = false
+        templateRetries = 0
         isLoaded = true
         call("lexmdZoom(s)", ["s": scale])
         pendingReset = true
@@ -224,11 +248,29 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         loadTemplate()
     }
 
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
+        templateLoadFailed(navigation, error)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
+        templateLoadFailed(navigation, error)
+    }
+
+    /// Loads the template again when its latest load fails, so the preview never stays blank.
+    private func templateLoadFailed(_ navigation: WKNavigation?, _ error: any Error) {
+        guard isLoadingTemplate, let templateNavigation, navigation === templateNavigation else { return }
+        Self.log.error("Preview page failed to load: \(error.localizedDescription, privacy: .public)")
+        self.templateNavigation = nil
+        guard templateRetries < 3 else { isLoadingTemplate = false; return }
+        templateRetries += 1
+        loadTemplate()
+    }
+
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
         guard let url = navigationAction.request.url else { return .cancel }
         let frame = navigationAction.targetFrame
-        if isLoadingTemplate, frame?.isMainFrame == true, url == Self.pageURL {
-            isLoadingTemplate = false
+        // The template, until its latest load finishes. Loads it supersedes ask here too.
+        if isLoadingTemplate, navigationAction.navigationType == .other, frame?.isMainFrame == true, url == Self.pageURL {
             return .allow
         }
         if navigationAction.navigationType == .linkActivated {
