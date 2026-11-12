@@ -212,6 +212,28 @@ struct TabCommandTests {
         #expect(!model.canShowOutline)
     }
 
+    /// Opening another project writes text that a background tab could not save earlier, instead
+    /// of dropping it with the tab.
+    @Test func projectChangeWritesUnsavedTabText() async throws {
+        let folder = try TestFolder()
+        let other = try TestFolder()
+        try folder.write("a.md", "# A\n")
+        try folder.write("b.md", "# B\n")
+        try other.write("c.md", "# C\n")
+        let model = AppModel.shared
+        model.open(folder.url)
+        try await waitUntil { model.tree.count == 2 }
+        let path = { FileScanner.canonicalPath(folder.url.appendingPathComponent($0).path) }
+        model.open(URL(fileURLWithPath: path("a.md")))
+        model.openInNewTab(path("b.md"))
+        let aTab = try #require(model.tabStore.list.tab(withPath: path("a.md")))
+        model.tabStore.list.update(aTab.id) { $0.state.unsavedText = "# A kept\n" }
+
+        model.open(other.url)
+        #expect(try String(contentsOfFile: path("a.md"), encoding: .utf8) == "# A kept\n")
+        model.closeTabsForProjectChange()
+    }
+
     private static func table(in view: NSView) -> NSTableView? {
         if let table = view as? NSTableView { return table }
         for sub in view.subviews { if let found = table(in: sub) { return found } }

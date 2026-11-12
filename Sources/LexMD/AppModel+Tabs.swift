@@ -63,6 +63,8 @@ extension AppModel {
         sidebarFiles.renamingPath = nil
         sidebarFiles.newFolders = []
         guard !tabStore.list.isEmpty || currentFile != nil else { return }
+        // Other tabs may hold text that could not be saved before; try once more before they close.
+        saveAllTabs()
         tabStore.list.removeAll()
         closeDocument()
     }

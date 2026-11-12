@@ -52,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationWillTerminate(_ notification: Notification) {
-        AppModel.shared.saveNow()
+        AppModel.shared.saveAllTabs()
     }
 
     func applicationWillResignActive(_ notification: Notification) {
