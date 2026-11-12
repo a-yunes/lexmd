@@ -87,6 +87,11 @@ final class AppModel {
         didSet { defaults.set(shortcutOverrides, forKey: Keys.shortcuts) }
     }
     var shortcutNote: String?
+    /// The tab Settings shows, kept between launches. Set it before opening Settings to show a
+    /// specific tab; see `showSettings(_:using:)` and `SettingsTabButton`.
+    var settingsTab = SettingsTab(rawValue: UserDefaults.standard.string(forKey: SettingsTab.defaultsKey) ?? "") ?? .general {
+        didSet { defaults.set(settingsTab.rawValue, forKey: SettingsTab.defaultsKey) }
+    }
     private(set) var recentFiles: [String] = []
     var history: [String] = []
     var historyIndex = -1
