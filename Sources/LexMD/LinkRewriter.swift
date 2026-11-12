@@ -655,7 +655,9 @@ struct TextFile: Sendable {
     }
 
     /// Writes atomically next to the original, keeping its permissions and other attributes.
-    func write(to url: URL) throws {
+    /// A symbolic link stays a link: the file it points to is written.
+    func write(to link: URL) throws {
+        let url = link.resolvingSymlinksInPath()
         guard var data = text.data(using: encoding) else { throw CocoaError(.fileWriteInapplicableStringEncoding) }
         if hasBOM {
             switch encoding {

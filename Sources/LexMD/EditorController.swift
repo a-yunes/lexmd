@@ -40,6 +40,8 @@ final class EditorController: NSObject, NSTextViewDelegate {
 
     var onTextChange: ((String) -> Void)?
     var onScroll: ((CGFloat) -> Void)?
+    /// Set while code scrolls to a place the preview reveals by itself, so `onScroll` stays quiet.
+    var isScrollingQuietly = false
     /// Returns true when it handled Escape.
     var onCancel: (() -> Bool)?
     /// Runs first for every key command; returns true when it handled it (link completion).
@@ -354,7 +356,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
     }
 
     @objc private func boundsDidChange(_ notification: Notification) {
-        guard let document = scrollView.documentView else { return }
+        guard !isScrollingQuietly, let document = scrollView.documentView else { return }
         let clip = scrollView.contentView.bounds
         let insets = scrollView.contentInsets
         let maxY = document.frame.height + insets.top + insets.bottom - clip.height

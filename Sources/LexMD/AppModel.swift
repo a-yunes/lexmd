@@ -452,6 +452,9 @@ final class AppModel {
             recentFolders = Array(([root] + recentFolders.filter { $0 != root }).prefix(10))
             defaults.set(recentFolders, forKey: Keys.recentFolders)
             watch(root)
+        } else {
+            // Opening the same folder again rescans it.
+            outline.index.refresh()
         }
         rescan()
     }
@@ -729,6 +732,12 @@ final class AppModel {
             return
         }
         guard path != currentFile?.path else { return }
+        if Self.isContextClick(Self.currentEvent()) {
+            // A secondary click shows the row's menu. Opening the row here would replace the
+            // document in the active tab before a command such as Open in New Tab runs.
+            selectedPath = currentFile?.path
+            return
+        }
         if routeSelectionToTabs(path) { return }
         load(URL(fileURLWithPath: path))
     }
@@ -781,7 +790,7 @@ final class AppModel {
 
     func saveNow() {
         saveTask?.cancel()
-        guard let url = currentFile, text != savedText else { return }
+        guard let url = currentFile, text != savedText, !sidebarFiles.isTrashing(url.path) else { return }
         do {
             // Write in place so file watchers see a modification rather than a replace.
             try text.write(to: url, atomically: false, encoding: .utf8)

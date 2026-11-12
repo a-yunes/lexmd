@@ -13,6 +13,12 @@ final class SidebarFileState {
     var newFolders: Set<String> = []
     /// Moves items to the Trash. Replaced in tests.
     @ObservationIgnored var recycler: FileOperations.Recycler = FileOperations.systemRecycler
+    /// Items on their way to the Trash; autosave must not recreate documents inside them.
+    @ObservationIgnored var trashing: Set<String> = []
+
+    func isTrashing(_ path: String) -> Bool {
+        trashing.contains { path == $0 || path.hasPrefix($0 + "/") }
+    }
 }
 
 /// Unsaved file contents written by a link update, filled in once the background write ends.
@@ -312,11 +318,15 @@ extension AppModel {
         saveNow()
         let path = url.path
         let recycler = sidebarFiles.recycler
+        sidebarFiles.trashing.insert(path)
         Task { [weak self] in
             do {
                 let trashed = try await FileOperations.moveToTrash(URL(fileURLWithPath: path), using: recycler)
+                self?.sidebarFiles.trashing.remove(path)
                 self?.itemWasTrashed(path, to: trashed, registerUndo: registerUndo)
             } catch {
+                self?.sidebarFiles.trashing.remove(path)
+                self?.saveNow()
                 self?.showFileProblem("Couldn’t move “\(url.lastPathComponent)” to the Trash.", error)
             }
         }
@@ -329,8 +339,16 @@ extension AppModel {
         if let renaming = sidebarFiles.renamingPath, inside(renaming) { sidebarFiles.renamingPath = nil }
         history = history.filter { !inside($0) }
         historyIndex = min(historyIndex, history.count - 1)
+        // Text that never reached the disk (typed while the item was moving, or that a tab could
+        // not save) goes with its document to the Trash rather than being dropped with the tab.
+        var unsaved = tabStore.list.tabs.compactMap { tab in tab.state.unsavedText.map { (tab.path, $0) } }
+        if let current = currentFile?.path, text != savedText { unsaved.append((current, text)) }
+        for (document, contents) in unsaved where inside(document) {
+            guard let trashed, let moved = PathMove(from: path, to: trashed.path).map(document) else { continue }
+            try? contents.write(toFile: moved, atomically: false, encoding: .utf8)
+        }
         if let current = currentFile?.path, inside(current) {
-            // Its text is already saved; nothing may write it back to the old place.
+            // Nothing may write its text back to the old place.
             savedText = text
             _ = tabStore.list.removeAll(where: inside)
             if tabStore.list.activeID != nil { showActiveTab() } else { closeDocument() }

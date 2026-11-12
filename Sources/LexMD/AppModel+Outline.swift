@@ -98,6 +98,10 @@ final class OutlineModel {
     /// All links to the document; `backlinks` lists at most `Backlink.limit` of them.
     private(set) var backlinkCount = 0
     private(set) var problems: [LinkProblem] = []
+    /// Whether the panel has anything to show: more than one heading, a backlink, or a broken
+    /// link. It changes only when an analysis or the index reports on the open document, so
+    /// switching documents keeps the previous answer until the new one is known.
+    private(set) var hasContent = false
     let index = LinkIndex()
 
     @ObservationIgnored private(set) var documentPath: String?
@@ -134,23 +138,44 @@ final class OutlineModel {
         return candidates
     }
 
-    func apply(_ analysis: OutlineAnalysis, path: String) {
+    /// The analysis of the open document, with the number of links to it from the index.
+    func apply(_ analysis: OutlineAnalysis, path: String, incomingLinks: Int) {
         if documentPath != path { currentHeading = nil }
+        if backlinksPath != path, backlinksPath != nil { setBacklinks([], references: [], path: nil) }
         documentPath = path
         if headings != analysis.headings { headings = analysis.headings }
         if problems != analysis.problems { problems = analysis.problems }
         if let current = currentHeading, current >= headings.count { currentHeading = nil }
+        setIncomingLinks(incomingLinks)
     }
 
     func setBacklinks(_ links: [Backlink], references: [LinkReference], path: String?) {
         backlinksPath = path
         backlinkReferences = references
         if backlinks != links { backlinks = links }
-        if backlinkCount != references.count { backlinkCount = references.count }
+        setIncomingLinks(references.count)
+    }
+
+    /// The number of links to the open document, known from the index before backlinks load.
+    func setIncomingLinks(_ count: Int) {
+        if backlinkCount != count { backlinkCount = count }
+        let content = Self.hasContent(headings: headings.count, backlinks: backlinkCount, problems: problems.count)
+        if hasContent != content { hasContent = content }
+    }
+
+    /// One heading alone is not worth an outline; links and problems always are.
+    nonisolated static func hasContent(headings: Int, backlinks: Int, problems: Int) -> Bool {
+        headings > 1 || backlinks > 0 || problems > 0
     }
 
     func needsBacklinks(_ references: [LinkReference], path: String) -> Bool {
         backlinksPath != path || backlinkReferences != references
+    }
+
+    /// Forgets the outline when no document is open.
+    func close() {
+        clear()
+        if hasContent { hasContent = false }
     }
 
     func clear() {
@@ -200,13 +225,20 @@ extension AppModel {
         outline.completion = completion
     }
 
+    /// The panel shows when the reader wants it and the document has something to show; the
+    /// preference is kept for documents that do.
+    var showsOutlinePanel: Bool { isOutlineVisible && canShowOutline }
+
+    /// Show/Hide Outline is available only for documents with an outline, backlinks, or problems.
+    var canShowOutline: Bool { currentFile != nil && outline.hasContent }
+
     func toggleOutline() {
+        guard canShowOutline else { NSSound.beep(); return }
         withAnimation(.snappy(duration: 0.25)) { isOutlineVisible.toggle() }
     }
 
     func outlineVisibilityChanged() {
-        guard isOutlineVisible else { return }
-        if outline.documentPath != currentFile?.path { outline.clear() }
+        guard isOutlineVisible, currentFile != nil else { return }
         scheduleOutlineUpdate(debounce: false)
         updateBacklinks()
     }
@@ -217,8 +249,11 @@ extension AppModel {
 
     // MARK: Index upkeep
 
+    /// Follows the project folder. Changes inside it reach the index as file events, and file
+    /// commands refresh it themselves, so a new sidebar tree alone does not rescan the project.
     func linksTreeDidChange() {
-        outline.index.setRoot(rootURL?.path)
+        let root = rootURL?.path
+        if outline.index.root != root { outline.index.setRoot(root) }
     }
 
     /// Re-reads changed documents and images; folder changes rescan the whole project.
@@ -245,6 +280,9 @@ extension AppModel {
             // Wiki links and anchors in the preview may resolve differently now.
             render(debounce: false)
         }
+        if let path = currentFile?.path, outline.documentPath == path {
+            outline.setIncomingLinks(snapshot.incoming[path]?.count ?? 0)
+        }
         updateBacklinks()
     }
 
@@ -263,21 +301,23 @@ extension AppModel {
 
     // MARK: Analysis
 
+    /// Analyzes the open document. This runs while the panel is hidden too, less often, since
+    /// whether the panel can be shown depends on it.
     func scheduleOutlineUpdate(debounce: Bool) {
         outline.analysisTask?.cancel()
-        guard let path = currentFile?.path else { outline.clear(); return }
-        guard isOutlineVisible else { return }
+        guard let path = currentFile?.path else { outline.close(); return }
         if outline.backlinksPath != path { updateBacklinks() }
         let source = text
         let context = linkContext(for: source)
+        let delay: Duration = isOutlineVisible ? .milliseconds(250) : .seconds(1)
         outline.analysisTask = Task { [weak self] in
             if debounce {
-                try? await Task.sleep(for: .milliseconds(250))
+                try? await Task.sleep(for: delay)
                 guard !Task.isCancelled else { return }
             }
             let analysis = await runDetached { OutlineAnalysis.make(source: source, context: context) }
             guard let self, !Task.isCancelled, self.currentFile?.path == path else { return }
-            self.outline.apply(analysis, path: path)
+            self.outline.apply(analysis, path: path, incomingLinks: self.outline.index.snapshot.incoming[path]?.count ?? 0)
             self.refreshCurrentHeading()
         }
     }
@@ -323,12 +363,14 @@ extension AppModel {
 
     /// Scrolls the preview and the editor to a heading from the outline.
     func revealHeading(_ heading: OutlineHeading) {
-        outline.setCurrentHeading(heading.id)
         if viewMode != .read {
             editor.revealAtTop(heading.range.location)
             outline.lastEditorScroll = Date()
         }
         if viewMode != .edit { preview.revealHeading(heading.slug, smooth: true) }
+        // After the editor scrolled: its top line may still belong to an earlier heading when the
+        // document ends too soon to bring this one to the top.
+        outline.setCurrentHeading(heading.id)
     }
 
     /// Opens a Markdown document, then scrolls to the heading a link's `#fragment` names.
@@ -352,7 +394,12 @@ extension AppModel {
         let wasOpen = currentFile?.path == link.path
         openPath(link.path, inNewTab: inNewTab)
         guard currentFile?.path == link.path else { return }
-        if viewMode != .read { editor.reveal(link.range, indicator: true, select: true) }
+        if viewMode != .read {
+            // The preview reveals the link's section itself; following the editor would scroll it twice.
+            editor.isScrollingQuietly = viewMode == .split
+            editor.reveal(link.range, indicator: true, select: true)
+            editor.isScrollingQuietly = false
+        }
         if viewMode != .edit, let heading = outline.headings(of: text).last(where: { $0.line <= link.line }) {
             preview.revealHeading(heading.slug, smooth: wasOpen, afterRender: !wasOpen)
         }
@@ -491,20 +538,37 @@ extension AppModel {
 }
 
 extension EditorController {
-    /// Moves the caret to a location and scrolls its line to the top of the editor.
+    /// Moves the caret to a location and scrolls its line to the top of the editor. The preview is
+    /// not scrolled along, since callers reveal the same place in it precisely.
     func revealAtTop(_ location: Int) {
         let length = (textView.string as NSString).length
         let range = NSRange(location: min(max(location, 0), length), length: 0)
+        isScrollingQuietly = true
+        defer { isScrollingQuietly = false }
         textView.setSelectedRange(range)
-        guard let window = textView.window else { textView.scrollRangeToVisible(range); return }
-        let screenRect = textView.firstRect(forCharacterRange: range, actualRange: nil)
-        guard screenRect != .zero else { textView.scrollRangeToVisible(range); return }
-        let rect = textView.convert(window.convertFromScreen(screenRect), from: nil)
+        guard textView.window != nil, let lineTop = lineTop(at: range.location) else {
+            textView.scrollRangeToVisible(range)
+            return
+        }
         let clip = scrollView.contentView
         let top = scrollView.contentInsets.top
         let maxY = max(-top, textView.frame.height - clip.bounds.height)
-        clip.scroll(to: NSPoint(x: 0, y: min(max(rect.minY - top - 12, -top), maxY)))
+        clip.scroll(to: NSPoint(x: 0, y: min(max(lineTop - top - 12, -top), maxY)))
         scrollView.reflectScrolledClipView(clip)
+    }
+
+    /// The top of the line at a location in text view coordinates. The text before it is laid out
+    /// first: estimated heights would put the line too high or too low. (The text view's
+    /// `firstRect` is no help here: it is empty for text outside the visible area.)
+    func lineTop(at location: Int) -> CGFloat? {
+        guard let layout = textView.textLayoutManager, let content = layout.textContentManager else { return nil }
+        let start = layout.documentRange.location
+        guard let target = content.location(start, offsetBy: location),
+              let before = NSTextRange(location: start, end: target) else { return nil }
+        layout.ensureLayout(for: before)
+        guard let fragment = layout.textLayoutFragment(for: target) else { return nil }
+        let lineOffset = fragment.textLineFragment(for: target, isUpstreamAffinity: false)?.typographicBounds.minY ?? 0
+        return textView.textContainerOrigin.y + fragment.layoutFragmentFrame.minY + lineOffset
     }
 
     /// The text location at the top of the visible editor area.

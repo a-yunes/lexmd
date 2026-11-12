@@ -52,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationWillTerminate(_ notification: Notification) {
-        AppModel.shared.saveNow()
+        AppModel.shared.saveAllTabs()
     }
 
     func applicationWillResignActive(_ notification: Notification) {
@@ -143,7 +143,7 @@ struct LexMDCommands: Commands {
         }
         CommandGroup(before: .sidebar) {
             item(.toggleSidebar) { model.toggleSidebar() }
-            item(.toggleOutline) { model.toggleOutline() }
+            item(.toggleOutline, disabled: !model.canShowOutline) { model.toggleOutline() }
             Divider()
             item(.previewOnly) { model.setViewMode(.read) }
             item(.split) { model.setViewMode(.split) }

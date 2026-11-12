@@ -30,7 +30,7 @@ extension AppModel {
     /// Lets a selection open in a new tab (Command-click) or switch to the tab that already
     /// shows it. Returns true when handled here.
     func routeSelectionToTabs(_ path: String) -> Bool {
-        if currentFile != nil, Self.isCommandClick(NSApp.currentEvent) {
+        if currentFile != nil, Self.isCommandClick(Self.currentEvent()) {
             openInNewTab(path)
             return true
         }
@@ -46,11 +46,25 @@ extension AppModel {
         return event.modifierFlags.contains(.command)
     }
 
+    /// A right click or Control-click, which shows a context menu.
+    static func isContextClick(_ event: NSEvent?) -> Bool {
+        switch event?.type {
+        case .rightMouseDown?, .rightMouseUp?: true
+        case .leftMouseDown?, .leftMouseUp?: event?.modifierFlags.contains(.control) == true
+        default: false
+        }
+    }
+
+    /// The event being handled when the sidebar selection changes. Replaced in tests.
+    static var currentEvent: () -> NSEvent? = { NSApp.currentEvent }
+
     /// Tabs belong to a project; opening another one closes them (they are restored next time).
     func closeTabsForProjectChange() {
         sidebarFiles.renamingPath = nil
         sidebarFiles.newFolders = []
         guard !tabStore.list.isEmpty || currentFile != nil else { return }
+        // Other tabs may hold text that could not be saved before; try once more before they close.
+        saveAllTabs()
         tabStore.list.removeAll()
         closeDocument()
     }
