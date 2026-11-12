@@ -52,7 +52,10 @@ struct CommandLineToolTests {
             return String(cString: resolved)
         }
 
-        func run(_ arguments: [String], shell: String = "/bin/sh", tool: URL? = nil, in directory: URL? = nil) throws -> Result {
+        func run(
+            _ arguments: [String], shell: String = "/bin/sh", tool: URL? = nil, in directory: URL? = nil,
+            environment extra: [String: String] = [:]
+        ) throws -> Result {
             try? FileManager.default.removeItem(at: log)
             let process = Process()
             process.executableURL = URL(fileURLWithPath: shell)
@@ -61,7 +64,7 @@ struct CommandLineToolTests {
             process.environment = [
                 "PATH": folder.url.appendingPathComponent("fakebin").path + ":/usr/bin:/bin",
                 "LEXMD_TEST_LOG": log.path,
-            ]
+            ].merging(extra) { _, new in new }
             let out = Pipe(), err = Pipe()
             process.standardOutput = out
             process.standardError = err
@@ -141,6 +144,42 @@ struct CommandLineToolTests {
         #expect(FileManager.default.fileExists(atPath: work + "/Notes.markdown"))
         // Existing files are never touched.
         #expect(try String(contentsOf: box.work.appendingPathComponent("a.md"), encoding: .utf8) == "# A\n")
+    }
+
+    @Test(arguments: shells)
+    func opensNamesThatStartWithADash(shell: String) throws {
+        let box = try Sandbox()
+        let work = box.work.path
+        try "# Dash\n".write(toFile: work + "/-dash.md", atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(atPath: work + "/-folder", withIntermediateDirectories: true)
+        let result = try box.run(["--", "-dash.md", "-folder"], shell: shell)
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.open == ["-a", box.app.path, work + "/-dash.md", work + "/-folder"])
+
+        let created = try box.run(["--new", "--", "-new"], shell: shell)
+        #expect(created.status == 0, "\(created.stderr)")
+        #expect(created.open == ["-a", box.app.path, work + "/-new.md"])
+        #expect(FileManager.default.fileExists(atPath: work + "/-new.md"))
+    }
+
+    @Test(arguments: shells)
+    func ignoresAnExportedCDPATH(shell: String) throws {
+        let box = try Sandbox()
+        // A folder named like one in the work folder, reachable through CDPATH.
+        let elsewhere = box.folder.url.appendingPathComponent("elsewhere")
+        try FileManager.default.createDirectory(at: elsewhere.appendingPathComponent("sub"), withIntermediateDirectories: true)
+        let result = try box.run(["sub"], shell: shell, environment: ["CDPATH": Sandbox.realPath(elsewhere.path)])
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.open == ["-a", box.app.path, box.work.path + "/sub"])
+    }
+
+    @Test(arguments: shells)
+    func neverCreatesAFileForAnEmptyArgument(shell: String) throws {
+        let box = try Sandbox()
+        let result = try box.run(["--new", "", "a.md"], shell: shell)
+        #expect(result.status == 1)
+        #expect(result.open == ["-a", box.app.path, box.work.path + "/a.md"])
+        #expect(!FileManager.default.fileExists(atPath: box.work.path + "/.md"))
     }
 
     @Test(arguments: shells)

@@ -27,10 +27,24 @@ struct OpenPlanTests {
 
     @Test func filesElsewhereOpenTheFolderHoldingThem() {
         #expect(plan(["/w/docs/a.md", "/w/docs/x/b.md"], root: "/p", folders: []) == OpenPlan(folder: "/w/docs", files: ["/w/docs/a.md", "/w/docs/x/b.md"]))
-        #expect(plan(["/w/one/a.md", "/w/two/b.md"], folders: []) == OpenPlan(folder: "/w", files: ["/w/one/a.md", "/w/two/b.md"]))
+        #expect(plan(["/w/docs/one/a.md", "/w/docs/two/b.md"], folders: []) == OpenPlan(folder: "/w/docs", files: ["/w/docs/one/a.md", "/w/docs/two/b.md"]))
         // Never the whole disk or the home folder: the first file's folder wins.
         #expect(plan(["/a/x.md", "/b/y.md"], folders: []) == OpenPlan(folder: "/a", files: ["/a/x.md"]))
         #expect(plan(["\(home)/Notes/x.md", "\(home)/Work/y.md"], folders: []) == OpenPlan(folder: "\(home)/Notes", files: ["\(home)/Notes/x.md"]))
+    }
+
+    @Test func neverOpensFoldersAboveHomeOrWholeDisks() {
+        // Above the home folder: the first file's folder wins instead of /Users.
+        #expect(plan(["/Users/Shared/x.md", "\(home)/Notes/y.md"], folders: []) == OpenPlan(folder: "/Users/Shared", files: ["/Users/Shared/x.md"]))
+        // Top-level folders and external disks are too large to scan.
+        #expect(plan(["/w/one/a.md", "/w/two/b.md"], folders: []) == OpenPlan(folder: "/w/one", files: ["/w/one/a.md"]))
+        #expect(plan(["/Volumes/Disk/a/x.md", "/Volumes/Disk/b/y.md"], folders: []) == OpenPlan(folder: "/Volumes/Disk/a", files: ["/Volumes/Disk/a/x.md"]))
+        #expect(plan(["/Volumes/Disk/docs/a/x.md", "/Volumes/Disk/docs/b/y.md"], folders: [])
+            == OpenPlan(folder: "/Volumes/Disk/docs", files: ["/Volumes/Disk/docs/a/x.md", "/Volumes/Disk/docs/b/y.md"]))
+        #expect(OpenPlan.isTooBroad("/Users", home: home))
+        #expect(OpenPlan.isTooBroad(home, home: home))
+        #expect(!OpenPlan.isTooBroad(home + "/Notes", home: home))
+        #expect(!OpenPlan.isTooBroad("/Users/meow", home: home), "a sibling of home that only shares a prefix")
     }
 
     @Test func missingPathsAreSkipped() {
@@ -57,6 +71,17 @@ struct NoteCreatorTests {
         let markdown = try NoteCreator.create(name: "Plan.markdown", text: "", in: folder.url)
         #expect(markdown.lastPathComponent == "Plan.markdown")
         #expect(try Data(contentsOf: markdown).isEmpty)
+    }
+
+    @Test func neverWritesThroughASymbolicLink() throws {
+        let folder = try TestFolder()
+        let outside = try TestFolder()
+        let target = outside.url.appendingPathComponent("target.md")
+        // A link whose target does not exist yet; writing through it would create a file elsewhere.
+        try FileManager.default.createSymbolicLink(at: folder.url.appendingPathComponent("Ideas.md"), withDestinationURL: target)
+        let note = try NoteCreator.create(name: "Ideas", text: "x", in: folder.url)
+        #expect(note.lastPathComponent == "Ideas 2.md")
+        #expect(!FileManager.default.fileExists(atPath: target.path))
     }
 
     @Test func keepsNotesInsideTheFolder() throws {

@@ -80,9 +80,15 @@ final class CommitSession: Identifiable {
         for change in changes { setChecked(change, value) }
     }
 
-    func reload() {
+    /// Reloads in the background when files may have changed, keeping the sheet usable.
+    func refresh() {
+        guard !isCommitting else { return }
+        reload(showsProgress: false)
+    }
+
+    func reload(showsProgress: Bool = true) {
         loadTask?.cancel()
-        isLoading = true
+        if showsProgress { isLoading = true }
         let git = git
         let repo = repository
         let root = projectRoot
@@ -162,6 +168,8 @@ final class CommitSession: Identifiable {
             let result = await Task.detached(priority: .userInitiated) {
                 GitOperations.commit(git: git, repository: repo.root, changes: changes, message: message)
             }.value
+            // The sidebar updates even when the sheet was closed while committing.
+            GitModel.shared.refreshNow()
             guard let self else { return }
             self.isCommitting = false
             switch result {
@@ -177,7 +185,6 @@ final class CommitSession: Identifiable {
             case .failure(let error):
                 self.errorText = error.message
             }
-            GitModel.shared.refreshNow()
         }
     }
 }

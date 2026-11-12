@@ -58,7 +58,7 @@ enum GitOperations {
     static func operationInProgress(git: Git, repository: String) -> String? {
         let result = git.run(["rev-parse", "--absolute-git-dir"], in: repository, timeout: 10)
         guard result.succeeded else { return nil }
-        let dir = result.trimmed
+        let dir = result.line
         let manager = FileManager.default
         let checks = [
             ("MERGE_HEAD", "A merge"), ("rebase-merge", "A rebase"), ("rebase-apply", "A rebase"),
@@ -123,26 +123,51 @@ enum GitOperations {
     /// Commits exactly `changes` as they are on disk. Other staged changes stay staged and are
     /// not committed. Untracked files are added first and unstaged again if the commit fails.
     /// Returns the new commit's short hash.
-    static func commit(git: Git, repository: String, changes: [GitFileChange], message: String) -> Result<String, CommitError> {
+    static func commit(
+        git: Git, repository: String, changes: [GitFileChange], message: String, timeout: TimeInterval = 600
+    ) -> Result<String, CommitError> {
         guard !changes.isEmpty else { return .failure(.failed("Choose at least one file to commit.")) }
         let untracked = changes.filter { $0.kind == .untracked }.map(\.path)
+        /// Leaves the index as it was: files this call added are untracked again.
+        func unstageUntracked() {
+            guard !untracked.isEmpty else { return }
+            _ = git.run(["rm", "--cached", "--quiet", "--ignore-unmatch", "--"] + untracked, in: repository, timeout: 60)
+        }
         if !untracked.isEmpty {
             let add = git.run(["add", "--"] + untracked, in: repository, timeout: 120)
-            guard add.succeeded else { return .failure(.failed(add.message)) }
+            guard add.succeeded else {
+                // A failed or stopped add can still have staged some of the files.
+                unstageUntracked()
+                return .failure(.failed(add.message))
+            }
         }
         var seen = Set<String>()
         let paths = changes.flatMap(\.commitPaths).filter { seen.insert($0).inserted }
+        let headBefore = head(git: git, repository: repository)
         let commit = git.run(
             ["commit", "--only", "--cleanup=verbatim", "-F", "-", "--"] + paths,
-            in: repository, input: Data(message.utf8), timeout: 600
+            in: repository, input: Data(message.utf8), timeout: timeout
         )
         guard commit.succeeded else {
-            if !untracked.isEmpty {
-                _ = git.run(["rm", "--cached", "--quiet", "--ignore-unmatch", "--"] + untracked, in: repository, timeout: 60)
+            // Stopped after the commit was made (a slow post-commit hook): the added files are
+            // now committed, and unstaging them would stage their deletion.
+            if commit.timedOut || commit.cancelled, head(git: git, repository: repository) != headBefore {
+                return .success(shortHead(git: git, repository: repository))
             }
+            unstageUntracked()
             return .failure(.failed(commit.message))
         }
+        return .success(shortHead(git: git, repository: repository))
+    }
+
+    /// The full HEAD commit, or nil in a repository without commits.
+    private static func head(git: Git, repository: String) -> String? {
+        let result = git.run(["rev-parse", "--verify", "--quiet", "HEAD"], in: repository, timeout: 10)
+        return result.succeeded ? result.trimmed : nil
+    }
+
+    private static func shortHead(git: Git, repository: String) -> String {
         let hash = git.run(["rev-parse", "--short", "HEAD"], in: repository, timeout: 10)
-        return .success(hash.succeeded ? hash.trimmed : "")
+        return hash.succeeded ? hash.trimmed : ""
     }
 }

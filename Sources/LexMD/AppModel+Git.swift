@@ -36,8 +36,12 @@ final class GitModel {
         activeObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            // A repository may have been created or removed while LexMD was in the background.
-            MainActor.assumeIsolated { self?.discover() }
+            // A repository may have been created or removed while LexMD was in the background,
+            // and files the open commit sheet lists may have changed.
+            MainActor.assumeIsolated {
+                self?.discover()
+                self?.commitSession?.refresh()
+            }
         }
     }
 
@@ -153,8 +157,12 @@ final class GitModel {
                     self.badges = [:]
                     self.changedFolders = []
                 }
+                self.refreshNow()
+            } else {
+                // Discovery runs on every activation; unchanged repositories keep the spacing
+                // between status runs, so a slow repository is not scanned back to back.
+                self.scheduleStatus(after: 0)
             }
-            self.refreshNow()
         }
     }
 

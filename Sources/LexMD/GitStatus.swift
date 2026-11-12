@@ -56,8 +56,25 @@ struct GitFileChange: Sendable, Hashable, Identifiable {
     }
     /// LexMD commits documents and the images they use; other files are left to other tools.
     var isDocumentChange: Bool { isMarkdown || isImage }
-    /// Paths a commit of this change has to include (both sides of a rename).
-    var commitPaths: [String] { originalPath.map { [path, $0] } ?? [path] }
+    /// Paths a commit of this change has to include: both sides of a rename. The source of a
+    /// copy is left out, since committing it would also commit its own unrelated edits.
+    var commitPaths: [String] {
+        guard let originalPath, index == "R" || worktree == "R" else { return [path] }
+        return [path, originalPath]
+    }
+
+    /// The document changes among `changes`, resolving each file extension's type only once.
+    static func documents(in changes: [GitFileChange]) -> [GitFileChange] {
+        var isImageExtension: [String: Bool] = [:]
+        return changes.filter { change in
+            if change.isMarkdown { return true }
+            let ext = (change.path as NSString).pathExtension.lowercased()
+            if let known = isImageExtension[ext] { return known }
+            let image = UTType(filenameExtension: ext)?.conforms(to: .image) ?? false
+            isImageExtension[ext] = image
+            return image
+        }
+    }
 }
 
 struct GitStatusSnapshot: Sendable, Equatable {
@@ -65,11 +82,27 @@ struct GitStatusSnapshot: Sendable, Equatable {
     var branch: String?
     /// The HEAD commit, or nil in a repository without commits.
     var head: String?
-    var changes: [GitFileChange] = []
+    var changes: [GitFileChange] {
+        didSet { documentChanges = GitFileChange.documents(in: changes) }
+    }
+    /// The changes LexMD offers to commit: Markdown files and images. Computed once per
+    /// snapshot, because views read it on every update and a repository can have many
+    /// changes that are not documents.
+    private(set) var documentChanges: [GitFileChange]
+
+    init(branch: String? = nil, head: String? = nil, changes: [GitFileChange] = []) {
+        self.branch = branch
+        self.head = head
+        self.changes = changes
+        documentChanges = GitFileChange.documents(in: changes)
+    }
+
+    /// `documentChanges` follows from `changes`, so comparing it again would only cost time.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.branch == rhs.branch && lhs.head == rhs.head && lhs.changes == rhs.changes
+    }
 
     var hasConflicts: Bool { changes.contains { $0.kind == .conflicted } }
-    /// The changes LexMD offers to commit: Markdown files and images.
-    var documentChanges: [GitFileChange] { changes.filter(\.isDocumentChange) }
 
     /// Markdown starts checked, and so do new images next to or below a changed Markdown file,
     /// such as pasted images in an assets folder. Other images wait for the user.
@@ -88,6 +121,7 @@ struct GitStatusSnapshot: Sendable, Equatable {
 enum GitStatusParser {
     static func parse(_ data: Data) -> GitStatusSnapshot {
         var snapshot = GitStatusSnapshot()
+        var changes: [GitFileChange] = []
         let records = data.split(separator: 0, omittingEmptySubsequences: false)
             .map { String(decoding: $0, as: UTF8.self) }
         var index = 0
@@ -106,25 +140,26 @@ enum GitStatusParser {
                 }
             case "1":
                 guard let (xy, path) = fields(record, count: 8) else { continue }
-                snapshot.changes.append(change(path: path, xy: xy, original: nil))
+                changes.append(change(path: path, xy: xy, original: nil))
             case "2":
                 guard let (xy, path) = fields(record, count: 9) else { continue }
                 let original = index < records.count ? records[index] : nil
                 index += 1
-                snapshot.changes.append(change(path: path, xy: xy, original: original))
+                changes.append(change(path: path, xy: xy, original: original))
             case "u":
                 guard let (xy, path) = fields(record, count: 10) else { continue }
-                snapshot.changes.append(GitFileChange(
+                changes.append(GitFileChange(
                     path: path, index: xy.first ?? "U", worktree: xy.last ?? "U", kind: .conflicted))
             case "?":
                 let path = String(record.dropFirst(2))
                 // Nested repositories show up as untracked folders; they get their own status.
                 guard !path.isEmpty, !path.hasSuffix("/") else { continue }
-                snapshot.changes.append(GitFileChange(path: path, index: "?", worktree: "?", kind: .untracked))
+                changes.append(GitFileChange(path: path, index: "?", worktree: "?", kind: .untracked))
             default:
                 continue
             }
         }
+        snapshot.changes = changes
         return snapshot
     }
 
@@ -189,7 +224,7 @@ enum GitDiscovery {
 
     static func toplevel(git: Git, directory: String) -> String? {
         let result = git.run(["rev-parse", "--show-toplevel"], in: directory, timeout: 10)
-        let path = result.trimmed
+        let path = result.line
         guard result.succeeded, !path.isEmpty else { return nil }
         return FileScanner.canonicalPath(path)
     }
@@ -198,6 +233,8 @@ enum GitDiscovery {
     static func status(git: Git, repository: GitRepository, projectRoot: String, timeout: TimeInterval = 30) -> GitStatusSnapshot? {
         var arguments = [
             "status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all", "--ignore-submodules=all",
+            // Ahead and behind counts walk history and can take seconds; LexMD does not show them.
+            "--no-ahead-behind",
         ]
         var directory = repository.root
         if projectRoot.hasPrefix(repository.root + "/") {
