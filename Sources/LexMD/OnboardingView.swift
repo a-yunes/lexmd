@@ -108,7 +108,7 @@ struct OnboardingView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(model.rootURL?.lastPathComponent ?? "No project yet")
                             .font(.headline)
-                        Text(model.rootURL.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "Pick one now, or later with ⌘O.")
+                        Text(model.rootURL.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? model.shortcut(for: .open).map { "Pick one now, or later with \($0.display)." } ?? "Pick one now, or later from the File menu.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)

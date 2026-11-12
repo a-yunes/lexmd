@@ -129,6 +129,7 @@ extension AppModel {
     func closeQuickSearch() {
         isQuickSearchVisible = false
         quickOpensInNewTab = false
+        quickPendingActivation = nil
         quickTask?.cancel()
         if let monitor = quickKeyMonitor {
             NSEvent.removeMonitor(monitor)
@@ -143,7 +144,7 @@ extension AppModel {
             guard let self, self.isQuickSearchVisible else { return event }
             let modifiers = event.modifierFlags.intersection([.command, .option, .control])
             if modifiers == .command, event.keyCode == 36 || event.keyCode == 76 {
-                self.activateQuickItem(at: self.quickSelection, inNewTab: true)
+                self.activateQuickSelection(inNewTab: true)
                 return nil
             }
             guard modifiers.isEmpty else { return event }
@@ -159,6 +160,7 @@ extension AppModel {
     }
 
     func moveQuickSelection(_ delta: Int) {
+        quickPendingActivation = nil
         let count = quickItemCount
         guard count > 0 else { return }
         setQuickSelection(min(max(quickSelection + delta, 0), count - 1))
@@ -169,8 +171,14 @@ extension AppModel {
         updateQuickPreview()
     }
 
-    func activateQuickSelection() {
-        activateQuickItem(at: quickSelection)
+    /// Opens the selected result. While results for the typed query are still coming, the
+    /// list shows an earlier query's results, so the first new result opens once it arrives.
+    func activateQuickSelection(inNewTab: Bool = false) {
+        if isQuickSearching {
+            quickPendingActivation = inNewTab
+            return
+        }
+        activateQuickItem(at: quickSelection, inNewTab: inNewTab)
     }
 
     func activateQuickItem(at index: Int, inNewTab: Bool = false) {
@@ -213,12 +221,17 @@ extension AppModel {
             if quickMode == .files { empty.files = recentFileMatches(root: root) }
             quickResults = empty
             isQuickSearching = false
+            quickPendingActivation = nil
             setQuickSelection(0)
             return
         }
         let filesOnly = quickMode == .files
         let options = quickOptions
-        let files = FileScanner.searchableFiles(in: tree, root: root)
+        // Listing the tree's files takes a while in large projects, so it happens off the
+        // main thread once per tree.
+        let cachedFiles = searchFiles
+        let tree = self.tree
+        let generation = treeGeneration
         let currentPath = currentFile?.path
         let overrides = currentPath.map { [$0: text] } ?? [:]
         isQuickSearching = true
@@ -227,16 +240,23 @@ extension AppModel {
                 try? await Task.sleep(nanoseconds: 110_000_000)
                 guard !Task.isCancelled else { return }
             }
-            let results = await runDetached {
-                QuickSearchEngine.run(
+            let (files, results) = await runDetached { () -> ([SearchableFile], QuickSearchResults) in
+                let files = cachedFiles ?? FileScanner.searchableFiles(in: tree, root: root)
+                return (files, QuickSearchEngine.run(
                     query: query, options: options, files: files, overrides: overrides,
                     currentPath: currentPath, filesOnly: filesOnly
-                )
+                ))
             }
-            guard let self, !Task.isCancelled else { return }
+            guard let self else { return }
+            if cachedFiles == nil, self.treeGeneration == generation { self.searchFiles = files }
+            guard !Task.isCancelled else { return }
             self.quickResults = results
             self.isQuickSearching = false
             self.setQuickSelection(0)
+            if let inNewTab = self.quickPendingActivation {
+                self.quickPendingActivation = nil
+                self.activateQuickItem(at: 0, inNewTab: inNewTab)
+            }
         }
     }
 
@@ -267,14 +287,14 @@ extension AppModel {
         switch item {
         case .file(let file):
             let text = previewText(file.path)
-            let lines = text.components(separatedBy: "\n").prefix(10).enumerated().map {
+            let lines = Self.lines(of: text, count: 10).enumerated().map {
                 QuickPreviewLine(id: $0.offset + 1, text: String($0.element.prefix(300)), match: nil)
             }
             quickPreview = QuickPreviewData(name: file.name, folder: file.folder, detail: "File", lines: lines)
         case .hit(let hit):
             let text = previewText(hit.path)
-            let all = text.components(separatedBy: "\n")
             let center = hit.line - 1
+            let all = Self.lines(of: text, count: center + 6)
             let lower = max(0, center - 4), upper = min(all.count - 1, center + 5)
             var lines: [QuickPreviewLine] = []
             if lower <= upper {
@@ -292,5 +312,14 @@ extension AppModel {
             let name = (hit.name as NSString).deletingPathExtension
             quickPreview = QuickPreviewData(name: name, folder: hit.folder, detail: "Line \(hit.line)", lines: lines)
         }
+    }
+
+    /// The first `count` lines of `text`, split at line feeds like `components(separatedBy:)`,
+    /// without splitting the rest of a long document on every selection change.
+    nonisolated static func lines(of text: String, count: Int) -> [String] {
+        guard count > 0 else { return [] }
+        return text.utf8.split(separator: UInt8(ascii: "\n"), maxSplits: count, omittingEmptySubsequences: false)
+            .prefix(count)
+            .map { String(Substring($0)) }
     }
 }

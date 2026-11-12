@@ -37,4 +37,64 @@ struct TabCommandTests {
 
         model.closeTabsForProjectChange()
     }
+
+    @Test func returnWhileSearchingOpensTheTypedQuerysResult() async throws {
+        let folder = try TestFolder()
+        try folder.write("alpha.md", "# A\n")
+        try folder.write("beta.md", "# B\n")
+        let model = AppModel.shared
+        model.open(folder.url)
+        try await waitUntil { model.tree.count == 2 }
+        let path = { FileScanner.canonicalPath(folder.url.appendingPathComponent($0).path) }
+
+        model.toggleQuickSearch(mode: .files)
+        model.quickQuery = "alpha"
+        try await waitUntil { !model.isQuickSearching && model.quickResults.files.first?.path == path("alpha.md") }
+        #expect(model.searchFiles?.count == 2, "the tree's files are listed once and reused")
+
+        // The list still shows "alpha" when Return arrives right after typing "beta".
+        model.quickQuery = "beta"
+        model.activateQuickSelection()
+        #expect(model.isQuickSearchVisible)
+        try await waitUntil { model.currentFile?.path == path("beta.md") }
+        #expect(!model.isQuickSearchVisible)
+
+        model.tree = []
+        #expect(model.searchFiles == nil, "a new tree lists its files again")
+        model.closeTabsForProjectChange()
+    }
+
+    @Test func sidebarRowsTrackTheFilterAndRescansKeepUp() async throws {
+        let folder = try TestFolder()
+        try FileManager.default.createDirectory(at: folder.url.appendingPathComponent("docs"), withIntermediateDirectories: true)
+        try folder.write("docs/guide.md", "# Guide\n")
+        try folder.write("docs/notes.md", "# Notes\n")
+        try folder.write("readme.md", "# Readme\n")
+        let model = AppModel.shared
+        model.open(folder.url)
+        try await waitUntil { model.tree.count == 2 }
+        let docs = FileScanner.canonicalPath(folder.url.appendingPathComponent("docs").path)
+
+        model.setExpanded(subtreeOf: model.displayTree, false)
+        #expect(model.visibleRows.map(\.node.name) == ["docs", "readme.md"])
+        model.setExpanded(subtreeOf: model.displayTree, true)
+        #expect(model.visibleRows.map(\.node.name) == ["docs", "guide.md", "notes.md", "readme.md"])
+        #expect(model.visibleRows.first?.isExpanded == true)
+
+        model.filter = "gui"
+        #expect(model.isFiltering && !model.canToggleAllFolders)
+        #expect(model.visibleRows.map(\.node.name) == ["docs", "guide.md"])
+        model.filter = "  "
+        #expect(!model.isFiltering)
+        model.filter = ""
+        #expect(model.visibleRows.count == 4)
+        #expect(model.expanded.contains(docs))
+
+        // Requests that arrive while a scan runs are folded into one more scan, not lost.
+        try folder.write("docs/new.md", "# New\n")
+        for _ in 0..<5 { model.rescan() }
+        try await waitUntil { model.visibleRows.contains { $0.node.name == "new.md" } }
+
+        model.closeTabsForProjectChange()
+    }
 }

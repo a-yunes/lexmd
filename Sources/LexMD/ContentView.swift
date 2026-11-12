@@ -258,8 +258,8 @@ struct FileRow: View {
 
     var body: some View {
         let node = row.node
-        if node.children != nil {
-            let expanded = model.isExpanded(node)
+        if let children = node.children {
+            let expanded = row.isExpanded
             Button {
                 withAnimation(.snappy(duration: 0.22)) { model.setExpanded(node, !expanded) }
             } label: {
@@ -283,7 +283,8 @@ struct FileRow: View {
             }
             .buttonStyle(.plain)
             .contextMenu {
-                if FileScanner.folderIDs(in: [node]).count >= 2 {
+                // Menu items are built with the row, so look only one level down.
+                if children.contains(where: { $0.children != nil }) {
                     Button("Expand All Inside") { model.setExpanded(subtreeOf: [node], true) }
                     Button("Collapse All Inside") { model.setExpanded(subtreeOf: [node], false) }
                     Divider()
@@ -347,7 +348,7 @@ struct ExpandAllButton: View {
             Label(expanded ? "Collapse All Folders" : "Expand All Folders",
                   systemImage: expanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
         }
-        .help(expanded ? "Collapse All Folders (⌥⌘←)" : "Expand All Folders (⌥⌘→)")
+        .help(expanded ? model.helpText("Collapse All Folders", .collapseAll) : model.helpText("Expand All Folders", .expandAll))
     }
 }
 

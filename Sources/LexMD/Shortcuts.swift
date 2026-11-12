@@ -249,6 +249,11 @@ extension AppModel {
         shortcut(for: action)?.keyboardShortcut
     }
 
+    /// A tooltip that names the command's current shortcut, if it has one.
+    func helpText(_ title: String, _ action: ShortcutAction) -> String {
+        shortcut(for: action).map { "\(title) (\($0.display))" } ?? title
+    }
+
     func isCustomized(_ action: ShortcutAction) -> Bool {
         shortcutOverrides[action.rawValue] != nil
     }
