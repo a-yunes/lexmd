@@ -427,7 +427,9 @@ extension AppModel {
         let links = plan.linkCount
         let files = plan.files.count
         let alert = NSAlert()
-        alert.messageText = "Update \(counted(links, "link")) in \(counted(files, "document"))?"
+        alert.messageText = String(AttributedString(
+            localized: "Update ^[\(links) link](inflect: true) in ^[\(files) document](inflect: true)?"
+        ).characters)
         let names = plan.files.map { file in
             let relative = file.path.hasPrefix(root + "/") ? String(file.path.dropFirst(root.count + 1)) : file.path
             return "\(relative) (\(file.count))"

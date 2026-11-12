@@ -496,7 +496,7 @@ struct CommitSheet: View {
     static func commitTitle(count: Int, isCommitting: Bool) -> String {
         if isCommitting { return "Committing…" }
         guard count > 0 else { return "Commit" }
-        return "Commit \(counted(count, "File"))"
+        return String(AttributedString(localized: "Commit ^[\(count) File](inflect: true)").characters)
     }
 
     @ViewBuilder
