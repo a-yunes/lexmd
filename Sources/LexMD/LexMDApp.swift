@@ -144,5 +144,10 @@ struct LexMDCommands: Commands {
             item(.inlineCode) { model.editor.wrapSelection("`", "`") }
             item(.link) { model.editor.insertLink() }
         }
+        if model.showsGitCommands {
+            CommandMenu("Source Control") {
+                item(.commit, disabled: !model.canCommitCurrentDocument) { model.showCommitSheet() }
+            }
+        }
     }
 }

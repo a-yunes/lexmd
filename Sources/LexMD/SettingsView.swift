@@ -49,6 +49,14 @@ private struct GeneralSettings: View {
                     Text("Images and videos hosted online load from their servers, which can see when you open a document. Local images always show.")
                 }
             }
+            if model.showsGitCommands {
+                Section("Source Control") {
+                    Toggle(isOn: $model.showGitStatus) {
+                        Text("Show git status")
+                        Text("Marks changed files in the sidebar. LexMD runs Git only on this Mac and never contacts remotes.")
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .fixedSize(horizontal: false, vertical: true)
@@ -110,7 +118,7 @@ private struct ShortcutSettings: View {
     var body: some View {
         VStack(spacing: 0) {
             Form {
-                ForEach(ShortcutAction.Category.allCases, id: \.self) { category in
+                ForEach(ShortcutAction.Category.allCases.filter { $0 != .sourceControl || model.showsGitCommands }, id: \.self) { category in
                     Section(category.rawValue) {
                         ForEach(ShortcutAction.allCases.filter { $0.category == category }) { action in
                             LabeledContent(action.title) {

@@ -83,6 +83,14 @@ final class AppModel {
         }
     }
 
+    /// Shows git status badges in the sidebar for projects in git repositories.
+    var showGitStatus = true {
+        didSet {
+            defaults.set(showGitStatus, forKey: Keys.showGitStatus)
+            gitSettingChanged()
+        }
+    }
+
     // In-document find (preview find bar; the editor uses the native find bar)
     var isFindBarVisible = false
     var findQuery = "" {
@@ -143,6 +151,7 @@ final class AppModel {
         static let onboardingComplete = "onboardingComplete"
         static let recentFiles = "recentFiles"
         static let loadsRemoteContent = "loadsRemoteContent"
+        static let showGitStatus = "showGitStatus"
     }
 
     private init() {
@@ -152,6 +161,7 @@ final class AppModel {
         recentFolders = defaults.stringArray(forKey: Keys.recentFolders) ?? []
         compactFolders = defaults.object(forKey: Keys.compactFolders) as? Bool ?? true
         loadsRemoteContent = preview.allowsRemoteContent
+        showGitStatus = defaults.object(forKey: Keys.showGitStatus) as? Bool ?? true
         shortcutOverrides = defaults.dictionary(forKey: Keys.shortcuts) as? [String: String] ?? [:]
         recentFiles = defaults.stringArray(forKey: Keys.recentFiles) ?? []
         sidebarPosition = SidebarPosition(rawValue: defaults.string(forKey: Keys.sidebarPosition) ?? "") ?? .left
@@ -340,6 +350,7 @@ final class AppModel {
             guard let self, !Task.isCancelled, self.rootURL == root else { return }
             if nodes != self.tree { self.tree = nodes }
             self.isScanning = false
+            self.gitProjectScanned()
         }
     }
 
@@ -354,6 +365,7 @@ final class AppModel {
 
     private func handleFileEvents(_ events: [DirectoryWatcher.Event]) {
         guard let root = rootURL?.path else { return }
+        gitFileEvents(events)
         var structural = false
         var currentChanged = false
         let current = currentFile?.path
@@ -492,6 +504,7 @@ final class AppModel {
             try text.write(to: url, atomically: false, encoding: .utf8)
             savedText = text
             if saveError != nil { saveError = nil }
+            gitDocumentSaved()
         } catch {
             saveError = "Couldn’t save: \(error.localizedDescription)"
         }
