@@ -2,67 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleName</key>
-	<string>LexMD</string>
-	<key>CFBundleDisplayName</key>
-	<string>LexMD</string>
-	<key>CFBundleIdentifier</key>
-	<string>io.github.a-yunes.lexmd</string>
-	<key>CFBundleExecutable</key>
-	<string>LexMD</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
-	<key>CFBundleVersion</key>
-	<string>1</string>
-	<key>CFBundleIconFile</key>
-	<string>AppIcon</string>
-	<key>CFBundleIconName</key>
-	<string>AppIcon</string>
-	<key>NSHumanReadableCopyright</key>
-	<string>© 2026 Aleksei Iunes</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>26.0</string>
-	<key>LSApplicationCategoryType</key>
-	<string>public.app-category.productivity</string>
-	<key>NSHighResolutionCapable</key>
-	<true/>
-	<key>NSPrincipalClass</key>
-	<string>NSApplication</string>
-	<key>SUFeedURL</key>
-	<string>https://github.com/a-yunes/lexmd/releases/latest/download/appcast.xml</string>
-	<key>SUPublicEDKey</key>
-	<string>Qcg9oD3H5988Zq563oNDQ/JFnhwfF6p9WbD+WWKWwV4=</string>
-	<key>SURequireSignedFeed</key>
-	<true/>
-	<key>SUVerifyUpdateBeforeExtraction</key>
-	<true/>
-	<key>SUEnableSystemProfiling</key>
-	<false/>
-	<key>SUEnableAutomaticChecks</key>
-	<false/>
-	<key>SUAutomaticallyUpdate</key>
-	<false/>
-	<key>SUScheduledCheckInterval</key>
-	<integer>86400</integer>
-	<key>NSSupportsAutomaticTermination</key>
-	<false/>
+	<key>CFBundleDisplayName</key>
+	<string>LexMD</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
-			<key>CFBundleTypeName</key>
-			<string>Markdown Document</string>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
-			<key>LSHandlerRank</key>
-			<string>Default</string>
-			<key>LSItemContentTypes</key>
-			<array>
-				<string>net.daringfireball.markdown</string>
-			</array>
 			<key>CFBundleTypeExtensions</key>
 			<array>
 				<string>md</string>
@@ -74,6 +20,16 @@
 				<string>mdtxt</string>
 				<string>mdtext</string>
 				<string>mdx</string>
+			</array>
+			<key>CFBundleTypeName</key>
+			<string>Markdown Document</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>net.daringfireball.markdown</string>
 			</array>
 		</dict>
 		<dict>
@@ -90,6 +46,32 @@
 			</array>
 		</dict>
 	</array>
+	<key>CFBundleExecutable</key>
+	<string>LexMD</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.github.a-yunes.lexmd</string>
+	<key>CFBundleName</key>
+	<string>LexMD</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>2</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026 Aleksei Iunes</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
 	<key>NSServices</key>
 	<array>
 		<dict>
@@ -111,17 +93,48 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSSupportsAutomaticTermination</key>
+	<false/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
+	<key>SUEnableSystemProfiling</key>
+	<false/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/a-yunes/lexmd/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>Qcg9oD3H5988Zq563oNDQ/JFnhwfF6p9WbD+WWKWwV4=</string>
+	<key>SURequireSignedFeed</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>LexMD Document Tab</string>
+			<key>UTTypeIdentifier</key>
+			<string>io.github.a-yunes.lexmd.document-tab</string>
+		</dict>
+	</array>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>
-			<key>UTTypeIdentifier</key>
-			<string>net.daringfireball.markdown</string>
-			<key>UTTypeDescription</key>
-			<string>Markdown Document</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.plain-text</string>
 			</array>
+			<key>UTTypeDescription</key>
+			<string>Markdown Document</string>
+			<key>UTTypeIdentifier</key>
+			<string>net.daringfireball.markdown</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>
@@ -141,19 +154,6 @@
 					<string>text/markdown</string>
 				</array>
 			</dict>
-		</dict>
-	</array>
-	<key>UTExportedTypeDeclarations</key>
-	<array>
-		<dict>
-			<key>UTTypeIdentifier</key>
-			<string>io.github.a-yunes.lexmd.document-tab</string>
-			<key>UTTypeDescription</key>
-			<string>LexMD Document Tab</string>
-			<key>UTTypeConformsTo</key>
-			<array>
-				<string>public.data</string>
-			</array>
 		</dict>
 	</array>
 </dict>

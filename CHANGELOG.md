@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
 
 - A demo project with diagrams, math, callouts, links and images opens during setup. Help > Open
   Demo Project brings it back, restoring any demo files that were deleted.
@@ -34,6 +34,22 @@
   contacts a remote. Git features stay hidden outside repositories.
 - Quick Look previews of Markdown files in Finder, a `lexmd` command (LexMD > Install Command
   Line Tool…), and Shortcuts actions: Open in LexMD, Create Document, and Get Current Document.
+- Find and Replace in the find bar, with whole-word and regular expression options. Edit gains
+  Use Selection for Find, Jump to Selection (⌘J), Substitutions, Transformations and Speech.
+- Menus follow macOS: Format sits between Edit and View, toggles say Show or Hide, view modes
+  show a checkmark, and commands that can't act are disabled. File adds New Tab…, Close Window
+  (⇧⌘W), Quick Look and Move To…; ⌘W no longer quits the app.
+- The title shows the document's icon with its folder path menu, the toolbar can be customized,
+  the find bar and Open Quickly use Liquid Glass, and the outline is a resizable inspector. The
+  tab bar appears once a second document is open and lists hidden tabs when they don't fit.
+  Space shows Quick Look for the selected file in the sidebar.
+- LexMD Help is built in and works offline, and Help > Keyboard Shortcuts opens the shortcut list.
+- Accessibility: Reduce Motion is respected, Increase Contrast and Differentiate Without Color
+  underline links and strengthen borders, faint text is easier to read, the editor and preview
+  have VoiceOver names, and Tab reaches links and Copy buttons in the preview.
+- Faster and steadier: switching documents and typing do far less work, images load in the
+  background, large projects rescan and filter without stalling, and documents renamed or moved
+  in Finder are followed instead of recreated. Unsaved text is never dropped on quit.
 
 ## 1.0.0
 
