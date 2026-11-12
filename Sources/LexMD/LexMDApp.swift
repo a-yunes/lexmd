@@ -100,6 +100,7 @@ struct LexMDCommands: Commands {
             .disabled(model.recentFolders.isEmpty)
         }
         CommandGroup(after: .pasteboard) {
+            item(.copyRichText, disabled: !model.canExport) { model.copyRichText() }
             Divider()
             Menu("Find") {
                 item(.find) { model.showFind() }
@@ -113,6 +114,12 @@ struct LexMDCommands: Commands {
             item(.save) { model.saveNow() }
             Divider()
             item(.revealInFinder) { model.revealCurrentInFinder() }
+            Divider()
+            item(.exportPDF, disabled: !model.canExport) { model.exportPDF() }
+            item(.exportHTML, disabled: !model.canExport) { model.exportHTML() }
+        }
+        CommandGroup(replacing: .printItem) {
+            item(.printDocument, disabled: !model.canExport) { model.printDocument() }
         }
         CommandGroup(before: .sidebar) {
             item(.toggleSidebar) { model.toggleSidebar() }

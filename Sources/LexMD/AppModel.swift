@@ -407,7 +407,7 @@ final class AppModel {
     }
 
     /// Shows an alert as a sheet on the key window, or modally when there is none.
-    private func present(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+    func present(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         if let window = NSApp.keyWindow ?? NSApp.mainWindow {
             alert.beginSheetModal(for: window, completionHandler: completion)
         } else {

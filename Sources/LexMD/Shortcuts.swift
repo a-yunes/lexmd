@@ -102,6 +102,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case find, findNext, findPrevious, findInFiles
     case goBack, goForward
     case bold, italic, strikethrough, inlineCode, link
+    case exportPDF, exportHTML, printDocument, copyRichText
 
     var id: String { rawValue }
 
@@ -116,6 +117,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .find, .findNext, .findPrevious, .findInFiles: .find
         case .toggleSidebar, .editorOnly, .split, .previewOnly, .expandAll, .collapseAll, .zoomIn, .zoomOut, .zoomReset: .view
         case .bold, .italic, .strikethrough, .inlineCode, .link: .format
+        case .exportPDF, .exportHTML, .printDocument, .copyRichText: .file
         }
     }
 
@@ -146,6 +148,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .strikethrough: "Strikethrough"
         case .inlineCode: "Inline Code"
         case .link: "Link"
+        case .exportPDF: "Export as PDF…"
+        case .exportHTML: "Export as HTML…"
+        case .printDocument: "Print…"
+        case .copyRichText: "Copy as Rich Text"
         }
     }
 
@@ -176,6 +182,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .strikethrough: "shift+cmd+x"
         case .inlineCode: "cmd+e"
         case .link: "cmd+k"
+        case .exportPDF: "shift+cmd+e"
+        case .exportHTML: ""
+        case .printDocument: "option+cmd+p"
+        case .copyRichText: "option+cmd+c"
         }
         return Shortcut(string: value)
     }
