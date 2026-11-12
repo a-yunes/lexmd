@@ -4,6 +4,7 @@
 enum PreviewTemplate {
     static func html(allowsRemoteContent: Bool) -> String {
         page.replacingOccurrences(of: "REMOTE", with: allowsRemoteContent ? " https:" : "")
+            .replacingOccurrences(of: "</head>", with: renderingHead + "</head>")
     }
 
     private static let page = #"""
@@ -11,7 +12,7 @@ enum PreviewTemplate {
 <html>
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src lexmd-doc: data:REMOTE; media-src lexmd-doc: data:REMOTE; font-src lexmd-doc: data:; base-uri lexmd-doc:; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src lexmd-doc: data:REMOTE; media-src lexmd-doc: data:REMOTE; font-src lexmd-doc: lexmd-vendor: data:; base-uri lexmd-doc:; form-action 'none'">
 <meta name="color-scheme" content="light dark">
 <base id="lexmd-base" href="">
 <style>
@@ -257,6 +258,41 @@ mark.lexmd-hit.current {
 .tok-ins { color: var(--ins); }
 .tok-del { color: var(--del); }
 .tok-hunk { color: var(--hunk); }
+/* Links: wiki links to missing documents, and local links whose file or heading is gone. */
+.lexmd-missing { color: var(--tertiary); border-bottom: 1px dashed currentColor; cursor: default; }
+a.lexmd-broken { color: var(--caution); text-decoration: underline wavy color-mix(in srgb, var(--caution) 60%, transparent); text-underline-offset: 0.2em; text-decoration-thickness: 1px; }
+/* Printing and PDF export: light colors, full width, and page breaks that keep blocks readable. */
+@media print {
+  :root {
+    --text: #1d1d1f; --secondary: #6e6e73; --tertiary: #8e8e93; --accent: #0066cc;
+    --hair: rgba(0, 0, 0, 0.12); --hair-strong: rgba(0, 0, 0, 0.2);
+    --fill: rgba(0, 0, 0, 0.035); --fill-strong: rgba(0, 0, 0, 0.06);
+    --kw: #ad3da4; --str: #c41a16; --com: #707f8c; --num: #1c00cf;
+    --type: #0b4f79; --fn: #326d74; --attr: #815f03;
+    --ins: #1f7a35; --del: #b4232a; --hunk: #6c4fbb;
+    --diagram-bg: #ffffff !important; --diagram-surface: #f5f5f7 !important;
+    --diagram-surface-alt: #e8e8ed !important; --diagram-border: #b8b8bf !important;
+  }
+  html { font-size: 11pt !important; }
+  html, body { background: #fff !important; color: var(--text); }
+  #content { max-width: none; margin: 0; padding: 0; }
+  #content:empty::before, #lexmd-scroll, .codeblock .copy, .codeblock .lang { display: none !important; }
+  h1, h2, h3, h4, h5, h6 { break-after: avoid; page-break-after: avoid; break-inside: avoid; }
+  h1 + p { color: var(--text); }
+  p, li, dd, blockquote { orphans: 3; widows: 3; }
+  a { color: var(--accent); text-decoration: underline; text-decoration-thickness: 0.5pt; }
+  img, video, svg, figure, tr, .callout, li.task, kbd, .lexmd-diagram-view, div.lexmd-math { break-inside: avoid; page-break-inside: avoid; }
+  img, video { box-shadow: none !important; }
+  .codeblock, .table-wrap, .callout, pre.frontmatter, details, :not(pre) > code, th, mark, li.task > input[type=checkbox], .lexmd-diagram-view {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .codeblock pre, pre.frontmatter { overflow: visible; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .table-wrap { overflow: visible; border-radius: 0; border: none; }
+  table { border: 1px solid var(--hair-strong); }
+  thead { display: table-header-group; }
+  mark.lexmd-hit, mark.lexmd-hit.current { background: none; box-shadow: none; padding: 0; margin: 0; }
+}
 </style>
 </head>
 <body>
@@ -279,6 +315,7 @@ mark.lexmd-hit.current {
     if (node.nodeType !== 1) return;
     var codes = node.matches && node.matches('pre code') ? [node] : node.querySelectorAll('pre code[class*="language-"]');
     for (var i = 0; i < codes.length; i++) highlight(codes[i]);
+    if (window.lexmdEnhance) window.lexmdEnhance(node);
   }
 
   // Patch only the top-level blocks that changed so images and scroll position stay put.
@@ -337,7 +374,7 @@ mark.lexmd-hit.current {
     var walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
       acceptNode: function (n) {
         var p = n.parentNode;
-        if (!p || p.closest('.copy, .lang, script, style')) return NodeFilter.FILTER_REJECT;
+        if (!p || p.closest('.copy, .lang, script, style, svg, .katex')) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -419,6 +456,45 @@ mark.lexmd-hit.current {
     }
   });
 
+  // Outline: scroll to a heading, and report the heading in view as the page scrolls or changes.
+  var spyId = null, spyHold = 0, spyTimer = null;
+  function headingInView() {
+    // Headings drawn inside diagrams, math, or footnotes are not document headings.
+    var hs = Array.prototype.filter.call(content.querySelectorAll('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]'), function (h) {
+      return !h.closest('.lexmd-diagram, .lexmd-diagram-view, .lexmd-math, svg, .footnotes');
+    });
+    var limit = Math.min(140, window.innerHeight * 0.3), id = '';
+    var atEnd = window.scrollY > 0 && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2;
+    for (var i = 0; i < hs.length; i++) {
+      var top = hs[i].getBoundingClientRect().top;
+      if (top <= limit || (atEnd && top < window.innerHeight)) id = hs[i].id; else break;
+    }
+    return id;
+  }
+  function reportHeading(id) {
+    if (id === spyId) return;
+    spyId = id;
+    window.webkit.messageHandlers.lexmd.postMessage({ type: 'heading', id: id });
+  }
+  function queueSpy() {
+    if (spyTimer) return;
+    spyTimer = setTimeout(function () {
+      spyTimer = null;
+      if (Date.now() >= spyHold) reportHeading(headingInView());
+    }, 60);
+  }
+  window.addEventListener('scroll', queueSpy, { passive: true });
+  window.addEventListener('resize', queueSpy);
+  new MutationObserver(queueSpy).observe(content, { childList: true });
+  window.lexmdReveal = function (id, smooth) {
+    var target = document.getElementById(id);
+    if (!target) return false;
+    spyHold = smooth ? Date.now() + 700 : 0;
+    target.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
+    reportHeading(id);
+    return true;
+  };
+
   var KW = {};
   ('abstract actor and any as assert associatedtype async await break case catch class const constexpr continue ' +
    'convenience crate debugger declare def default defer del delete deinit do dyn elif else elsif end enum except ' +
@@ -434,7 +510,7 @@ mark.lexmd-hit.current {
 
   var HASH = /^(py|python|python3|rb|ruby|sh|bash|zsh|shell|console|fish|yaml|yml|toml|r|perl|pl|ps1|powershell|dockerfile|makefile|make|conf|ini|properties|elixir|ex|exs|nim|coffee|julia|jl|cmake|nix|graphql|gql|tf|hcl|env|gitignore)$/;
   var DASH = /^(sql|lua|haskell|hs|elm|ada|psql|mysql|sqlite)$/;
-  var SKIP = /^(text|txt|plain|plaintext|md|markdown|html|xml|svg|csv|tsv|log|output|mermaid)$/;
+  var SKIP = /^(text|txt|plain|plaintext|md|markdown|html|xml|svg|csv|tsv|log|output|mermaid|pele|math)$/;
 
   function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 

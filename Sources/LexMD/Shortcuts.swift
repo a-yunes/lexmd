@@ -104,11 +104,17 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case bold, italic, strikethrough, inlineCode, link
     case newFolder, renameItem, duplicateItem, moveToTrash
     case closeTab, reopenClosedTab, showNextTab, showPreviousTab
+    case formatTable
+    case focusMode, typewriterScrolling
+    case commit
+    case exportPDF, exportHTML, printDocument, copyRichText
+    case toggleOutline
 
     var id: String { rawValue }
 
     enum Category: String, CaseIterable {
         case file = "File", navigate = "Navigate", find = "Find", view = "View", format = "Format"
+        case sourceControl = "Source Control"
     }
 
     var category: Category {
@@ -117,9 +123,14 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .goBack, .goForward: .navigate
         case .find, .findNext, .findPrevious, .findInFiles: .find
         case .toggleSidebar, .editorOnly, .split, .previewOnly, .expandAll, .collapseAll, .zoomIn, .zoomOut, .zoomReset: .view
+        case .toggleOutline: .view
         case .bold, .italic, .strikethrough, .inlineCode, .link: .format
         case .newFolder, .renameItem, .duplicateItem, .moveToTrash, .closeTab, .reopenClosedTab: .file
         case .showNextTab, .showPreviousTab: .navigate
+        case .formatTable: .format
+        case .focusMode, .typewriterScrolling: .view
+        case .commit: .sourceControl
+        case .exportPDF, .exportHTML, .printDocument, .copyRichText: .file
         }
     }
 
@@ -158,6 +169,15 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .reopenClosedTab: "Reopen Closed Tab"
         case .showNextTab: "Show Next Tab"
         case .showPreviousTab: "Show Previous Tab"
+        case .formatTable: "Format Table"
+        case .focusMode: "Focus Mode"
+        case .typewriterScrolling: "Typewriter Scrolling"
+        case .commit: "Commit…"
+        case .exportPDF: "Export as PDF…"
+        case .exportHTML: "Export as HTML…"
+        case .printDocument: "Print…"
+        case .copyRichText: "Copy as Rich Text"
+        case .toggleOutline: "Show/Hide Outline"
         }
     }
 
@@ -196,6 +216,15 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .reopenClosedTab: "shift+cmd+t"
         case .showNextTab: "ctrl+tab"
         case .showPreviousTab: "ctrl+shift+tab"
+        case .formatTable: "option+cmd+t"
+        case .focusMode: "option+cmd+f"
+        case .typewriterScrolling: ""
+        case .commit: "option+cmd+k"
+        case .exportPDF: "shift+cmd+e"
+        case .exportHTML: ""
+        case .printDocument: "option+cmd+p"
+        case .copyRichText: "option+cmd+c"
+        case .toggleOutline: "option+cmd+o"
         }
         return Shortcut(string: value)
     }

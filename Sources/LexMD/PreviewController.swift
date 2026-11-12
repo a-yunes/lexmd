@@ -6,6 +6,8 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     let webView: WKWebView
     var onOpenURL: ((URL) -> Void)?
     var onHighlightCount: ((Int) -> Void)?
+    /// The id of the heading in view as the preview scrolls (empty above the first heading).
+    var onHeadingChange: ((String) -> Void)?
 
     struct Highlight: Equatable {
         var query: String
@@ -16,6 +18,8 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     /// LexMD's preview script runs here, apart from the page world that holds document markup.
     private static let world = WKContentWorld.world(name: "LexMD")
     private static let pageURL = URL(string: "\(DocumentSchemeHandler.scheme):///")!
+    /// Pele draws diagrams and KaTeX typesets math; each is loaded when markup first needs it.
+    private static let libraries = [("class=\"lexmd-diagram\"", VendorAssets.peleScript), ("class=\"lexmd-math", VendorAssets.katexScript)]
 
     private var highlight: Highlight?
     private var highlightApplied = false
@@ -26,23 +30,34 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     private var lastHTML = ""
     private var lastBase: URL?
     private var pendingReset = false
+    private var pendingHeading: String?
     private var scale: Double = 1
     /// Scroll position (0...1) to apply after the next render, used when switching tabs.
     var pendingScrollFraction: Double?
+    /// Modifier keys held for the last clicked link; Command opens it in a new tab.
+    private(set) var linkModifiers: NSEvent.ModifierFlags = []
     private(set) var allowsRemoteContent: Bool
+    private let userContent: WKUserContentController
+    private var injectedLibraries: Set<Int> = []
+    private var pageLibraries: Set<Int> = []
 
     init(allowsRemoteContent: Bool) {
         self.allowsRemoteContent = allowsRemoteContent
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.setURLSchemeHandler(DocumentSchemeHandler(), forURLScheme: DocumentSchemeHandler.scheme)
+        configuration.setURLSchemeHandler(VendorSchemeHandler(), forURLScheme: VendorSchemeHandler.scheme)
         // Scripts in documents never run; LexMD's own script below is unaffected.
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         let content = WKUserContentController()
         content.addUserScript(WKUserScript(
+            source: PreviewTemplate.renderingScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Self.world
+        ))
+        content.addUserScript(WKUserScript(
             source: PreviewTemplate.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Self.world
         ))
         configuration.userContentController = content
+        userContent = content
         webView = WKWebView(frame: .zero, configuration: configuration)
 
         super.init()
@@ -58,6 +73,7 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     private func loadTemplate() {
         isLoaded = false
         isLoadingTemplate = true
+        pageLibraries = injectedLibraries
         webView.loadHTMLString(PreviewTemplate.html(allowsRemoteContent: allowsRemoteContent), baseURL: Self.pageURL)
     }
 
@@ -81,7 +97,12 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         let base = lastBase.flatMap { DocumentSchemeHandler.url(for: $0)?.absoluteString } ?? ""
         let reset = pendingReset
         pendingReset = false
+        loadLibraries(for: lastHTML)
         call("lexmdRender(html, base, reset)", ["html": lastHTML, "base": base, "reset": reset])
+        if let id = pendingHeading {
+            pendingHeading = nil
+            call("lexmdReveal(id, false)", ["id": id])
+        }
         if highlight != nil || highlightApplied {
             applyHighlight(scroll: Date() < highlightScrollUntil)
             highlightScrollUntil = .distantPast
@@ -89,6 +110,20 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         if let fraction = pendingScrollFraction {
             pendingScrollFraction = nil
             call("lexmdScroll(f)", ["f": fraction])
+        }
+    }
+
+    /// Pele and KaTeX take tens of milliseconds to evaluate, so they are injected into LexMD's
+    /// world (never loaded by the page) when a document first needs them, then kept as user
+    /// scripts for later page loads. Calls into the page run in order, so rendering sees them.
+    private func loadLibraries(for html: String) {
+        for (index, library) in Self.libraries.enumerated() where !pageLibraries.contains(index) && html.contains(library.0) {
+            guard let source = library.1 else { continue }
+            pageLibraries.insert(index)
+            if injectedLibraries.insert(index).inserted {
+                userContent.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Self.world))
+            }
+            webView.evaluateJavaScript(source, in: nil, in: Self.world, completionHandler: nil)
         }
     }
 
@@ -125,10 +160,24 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         call(body, [:]) { completion(($0 as? NSNumber)?.doubleValue ?? 0) }
     }
 
+    /// Scrolls a heading to the top, now or (`afterRender`) once the next document has rendered.
+    func revealHeading(_ id: String, smooth: Bool, afterRender: Bool = false) {
+        guard !afterRender, isLoaded else { pendingHeading = id; return }
+        call("lexmdReveal(id, smooth)", ["id": id, "smooth": smooth])
+    }
+
     func setScale(_ value: Double) {
         scale = value
         guard isLoaded else { return }
         call("lexmdZoom(s)", ["s": value])
+    }
+
+    /// True once the page has loaded; renders requested before that have been sent to it.
+    var isPageLoaded: Bool { isLoaded }
+
+    /// Runs a script body in LexMD's content world after any pending render, and returns its result.
+    func evaluate(_ body: String, _ arguments: [String: Any] = [:]) async throws -> Any? {
+        try await webView.callAsyncJavaScript(body, arguments: arguments, in: nil, contentWorld: Self.world)
     }
 
     /// Runs a call into the preview script in LexMD's content world.
@@ -143,6 +192,8 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         if type == "copy", let text = body["text"] as? String {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
+        } else if type == "heading", let id = body["id"] as? String {
+            onHeadingChange?(id)
         }
     }
 
@@ -153,6 +204,14 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         call("lexmdZoom(s)", ["s": scale])
         pendingReset = true
         flush()
+    }
+
+    /// A file URL with the `#fragment` of the link that led to it, so links can open at a heading.
+    private static func keepingFragment(of link: URL, _ file: URL?) -> URL? {
+        guard let file, let fragment = link.fragment, !fragment.isEmpty,
+              var components = URLComponents(url: file, resolvingAgainstBaseURL: false) else { return file }
+        components.percentEncodedFragment = link.fragment(percentEncoded: true)
+        return components.url ?? file
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
@@ -168,7 +227,9 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         }
         if navigationAction.navigationType == .linkActivated {
             // A click on a link, including one that asks for a new window.
-            if frame?.isMainFrame != false { onOpenURL?(DocumentSchemeHandler.fileURL(for: url) ?? url) }
+            linkModifiers = navigationAction.modifierFlags
+            defer { linkModifiers = [] }
+            if frame?.isMainFrame != false { onOpenURL?(Self.keepingFragment(of: url, DocumentSchemeHandler.fileURL(for: url)) ?? url) }
         } else if frame?.isMainFrame == true, url.isFileURL, FileScanner.isMarkdown(path: url.path) {
             // A Markdown file dropped onto the preview. Nothing else may navigate without a click.
             onOpenURL?(url)

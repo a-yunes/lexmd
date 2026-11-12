@@ -25,6 +25,13 @@ final class LinkWriteRecord {
 extension AppModel {
     var fileUndoManager: UndoManager? { editor.textView.undoManager ?? NSApp.mainWindow?.undoManager }
 
+    /// Refreshes backlinks, link checks, and git badges right after a file operation, without
+    /// waiting for file system events. `changed` lists files whose contents changed in place.
+    func filesDidChange(structure: Bool, changed: [String] = []) {
+        if structure { outline.index.refresh() } else if !changed.isEmpty { outline.index.update(paths: changed) }
+        git.scheduleStatus(after: 0.1)
+    }
+
     func treeWithNewFolders(_ nodes: [FileNode]) -> [FileNode] {
         guard let root = rootURL?.path, !sidebarFiles.newFolders.isEmpty else { return nodes }
         let existing = sidebarFiles.newFolders.filter {
@@ -67,6 +74,7 @@ extension AppModel {
             sidebarFiles.renameIsNewDocument = true
             sidebarFiles.renamingPath = file.path
             rescanSoon()
+            filesDidChange(structure: true)
         } catch {
             showFileProblem("Couldn’t create a document.", error)
         }
@@ -216,6 +224,7 @@ extension AppModel {
         reveal(move.to)
         persistTabs()
         rescan()
+        filesDidChange(structure: true)
     }
 
     // MARK: Duplicate
@@ -243,6 +252,7 @@ extension AppModel {
                 }
                 self.reveal(node.id)
                 self.rescan()
+                self.filesDidChange(structure: true)
                 if let undo = self.fileUndoManager {
                     undo.registerUndo(withTarget: self) { model in
                         MainActor.assumeIsolated { model.moveToTrash(node.url, registerUndo: false) }
@@ -304,6 +314,7 @@ extension AppModel {
         }
         persistTabs()
         rescan()
+        filesDidChange(structure: true)
         guard registerUndo, let trashed, let undo = fileUndoManager else { return }
         undo.registerUndo(withTarget: self) { model in
             MainActor.assumeIsolated { model.putBack(trashed, to: path) }
@@ -321,6 +332,7 @@ extension AppModel {
         }
         reveal(path)
         rescan()
+        filesDidChange(structure: true)
         fileUndoManager?.registerUndo(withTarget: self) { model in
             MainActor.assumeIsolated { model.moveToTrash(URL(fileURLWithPath: path), registerUndo: false) }
         }
@@ -395,6 +407,7 @@ extension AppModel {
         record.task = Task { [weak self] in
             let result = await runDetached { LinkUpdater.rewrite(paths, context: context) }
             record.files = result.written
+            self?.filesDidChange(structure: false, changed: result.written.map(\.path))
             if !result.failed.isEmpty {
                 self?.showFileProblem("Some links couldn’t be updated.", Self.list(result.failed, under: self?.rootURL?.path))
             }
@@ -416,6 +429,7 @@ extension AppModel {
             await previous?.value
             let files = record.files
             let skipped = await runDetached { LinkUpdater.restore(files, forward: forward) }
+            self?.filesDidChange(structure: false, changed: files.map(\.path))
             if !skipped.isEmpty {
                 self?.showFileProblem("Some files changed since the links were updated, so they were left as they are.",
                                       Self.list(skipped, under: self?.rootURL?.path))

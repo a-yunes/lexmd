@@ -3,6 +3,9 @@ import AppKit
 /// Plain-text view that keeps lines at a comfortable reading measure by centering the text column.
 final class LexMDTextView: NSTextView {
     var maxLineWidth: CGFloat = 700 { didSet { updateInsets() } }
+    /// Extra space below the text so the last line can scroll to the middle (typewriter scrolling).
+    var bottomOverscroll: CGFloat = 0 { didSet { if bottomOverscroll != oldValue { updateInsets() } } }
+    weak var editor: EditorController?
 
     override func setFrameSize(_ newSize: NSSize) {
         var size = newSize
@@ -19,8 +22,14 @@ final class LexMDTextView: NSTextView {
 
     func updateInsets() {
         let horizontal = max(28, ((bounds.width - maxLineWidth) / 2).rounded())
-        let inset = NSSize(width: horizontal, height: 30)
+        let inset = NSSize(width: horizontal, height: 30 + bottomOverscroll / 2)
         if textContainerInset != inset { textContainerInset = inset }
+    }
+
+    /// Keeps the top inset fixed; the overscroll only adds space below the text.
+    override var textContainerOrigin: NSPoint {
+        let origin = super.textContainerOrigin
+        return NSPoint(x: origin.x, y: origin.y - bottomOverscroll / 2)
     }
 }
 
@@ -33,12 +42,25 @@ final class EditorController: NSObject, NSTextViewDelegate {
     var onScroll: ((CGFloat) -> Void)?
     /// Returns true when it handled Escape.
     var onCancel: (() -> Bool)?
+    /// Runs first for every key command; returns true when it handled it (link completion).
+    var onCommand: ((Selector) -> Bool)?
     private var hasFindHighlights = false
     /// Multi-line constructs from the last full highlight, kept in step with edits.
-    private var blocks: MarkdownBlocks?
+    private(set) var blocks: MarkdownBlocks?
     /// The text edited since the last highlight, when only that part needs restyling.
     private var pendingEdit: NSRange?
     private var needsFullHighlight = true
+
+    // Paste, tables, spelling, focus, and typewriter state (EditorPaste.swift, TableEditing.swift, EditorFocus.swift).
+    /// The open document and image folder for pasted and dropped images.
+    var imageContext: (() -> ImageContext?)?
+    /// Called when spelling or grammar checking is toggled from the Edit menu.
+    var onCheckingChange: ((_ spelling: Bool, _ grammar: Bool) -> Void)?
+    var isFocusModeEnabled = false { didSet { if isFocusModeEnabled != oldValue { updateFocusDimming() } } }
+    var isTypewriterScrollingEnabled = false {
+        didSet { if isTypewriterScrollingEnabled != oldValue { typewriterSettingDidChange() } }
+    }
+    var focusState = EditorFocusState()
 
     var fontSize: CGFloat = 14 {
         didSet {
@@ -89,6 +111,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         textView.maxLineWidth = fontSize * 0.6 * 84
         textView.typingAttributes = MarkdownHighlighter.baseAttributes(size: fontSize)
         textView.delegate = self
+        textView.editor = self
 
         scrollView.documentView = textView
         scrollView.contentView.postsBoundsChangedNotifications = true
@@ -104,6 +127,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
             self, selector: #selector(scrollerStyleDidChange(_:)),
             name: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil
         )
+        setUpEditorFeatures()
     }
 
     @objc private func scrollerStyleDidChange(_ notification: Notification) {
@@ -256,11 +280,15 @@ final class EditorController: NSObject, NSTextViewDelegate {
     }
 
     func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if onCommand?(selector) == true { return true }
         if selector == #selector(NSResponder.insertNewline(_:)) {
             return continueList()
         }
         if selector == #selector(NSResponder.cancelOperation(_:)), onCancel?() == true {
             return true
+        }
+        if selector == #selector(NSResponder.insertTab(_:)) || selector == #selector(NSResponder.insertBacktab(_:)) {
+            return moveTableCell(backward: selector == #selector(NSResponder.insertBacktab(_:)))
         }
         return false
     }

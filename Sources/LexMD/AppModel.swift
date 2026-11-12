@@ -24,7 +24,10 @@ final class AppModel {
     // Tree
     private(set) var rootURL: URL?
     var tree: [FileNode] = [] {
-        didSet { updateDisplayTree() }
+        didSet {
+            updateDisplayTree()
+            linksTreeDidChange()
+        }
     }
     /// The tree as displayed: compacted when the setting is on, before filtering.
     private(set) var displayTree: [FileNode] = []
@@ -83,6 +86,30 @@ final class AppModel {
         }
     }
 
+    // Editor features; see AppModel+Editor.swift.
+    var imageFolder = "assets" {
+        didSet { defaults.set(imageFolder, forKey: Keys.imageFolder) }
+    }
+    var checksSpelling = true {
+        didSet { defaults.set(checksSpelling, forKey: Keys.checksSpelling); applyEditorSettings() }
+    }
+    var checksGrammar = false {
+        didSet { defaults.set(checksGrammar, forKey: Keys.checksGrammar); applyEditorSettings() }
+    }
+    var focusMode = false {
+        didSet { defaults.set(focusMode, forKey: Keys.focusMode); applyEditorSettings() }
+    }
+    var typewriterScrolling = false {
+        didSet { defaults.set(typewriterScrolling, forKey: Keys.typewriterScrolling); applyEditorSettings() }
+    }
+    /// Shows git status badges in the sidebar for projects in git repositories.
+    var showGitStatus = true {
+        didSet {
+            defaults.set(showGitStatus, forKey: Keys.showGitStatus)
+            gitSettingChanged()
+        }
+    }
+
     // In-document find (preview find bar; the editor uses the native find bar)
     var isFindBarVisible = false
     var findQuery = "" {
@@ -109,6 +136,24 @@ final class AppModel {
     var quickSelection = 0
     var quickPreview: QuickPreviewData?
     var quickFocusToken = 0
+
+    /// Shows the outline, backlinks, and link problems beside the document.
+    var isOutlineVisible = false {
+        didSet {
+            defaults.set(isOutlineVisible, forKey: Keys.outlineVisible)
+            outlineVisibilityChanged()
+        }
+    }
+    var suggestsLinks = true {
+        didSet { defaults.set(suggestsLinks, forKey: Keys.suggestsLinks) }
+    }
+    var marksBrokenLinks = true {
+        didSet {
+            defaults.set(marksBrokenLinks, forKey: Keys.marksBrokenLinks)
+            linkSettingsChanged()
+        }
+    }
+    let outline = OutlineModel()
 
     let editor = EditorController()
     let preview = PreviewController(allowsRemoteContent: UserDefaults.standard.bool(forKey: Keys.loadsRemoteContent))
@@ -147,6 +192,15 @@ final class AppModel {
         static let loadsRemoteContent = "loadsRemoteContent"
         static let openTabs = "openTabs"
         static let alwaysShowTabBar = "alwaysShowTabBar"
+        static let imageFolder = "imageFolder"
+        static let checksSpelling = "checksSpelling"
+        static let checksGrammar = "checksGrammar"
+        static let focusMode = "focusMode"
+        static let typewriterScrolling = "typewriterScrolling"
+        static let showGitStatus = "showGitStatus"
+        static let outlineVisible = "outlineVisible"
+        static let suggestsLinks = "suggestsLinks"
+        static let marksBrokenLinks = "marksBrokenLinks"
     }
 
     private init() {
@@ -156,10 +210,20 @@ final class AppModel {
         recentFolders = defaults.stringArray(forKey: Keys.recentFolders) ?? []
         compactFolders = defaults.object(forKey: Keys.compactFolders) as? Bool ?? true
         loadsRemoteContent = preview.allowsRemoteContent
+        showGitStatus = defaults.object(forKey: Keys.showGitStatus) as? Bool ?? true
         shortcutOverrides = defaults.dictionary(forKey: Keys.shortcuts) as? [String: String] ?? [:]
         recentFiles = defaults.stringArray(forKey: Keys.recentFiles) ?? []
         sidebarPosition = SidebarPosition(rawValue: defaults.string(forKey: Keys.sidebarPosition) ?? "") ?? .left
         appearanceMode = AppearanceMode(rawValue: defaults.string(forKey: Keys.appearance) ?? "") ?? .system
+        imageFolder = defaults.string(forKey: Keys.imageFolder) ?? "assets"
+        checksSpelling = defaults.object(forKey: Keys.checksSpelling) as? Bool ?? true
+        checksGrammar = defaults.bool(forKey: Keys.checksGrammar)
+        focusMode = defaults.bool(forKey: Keys.focusMode)
+        typewriterScrolling = defaults.bool(forKey: Keys.typewriterScrolling)
+        configureEditorFeatures()
+        isOutlineVisible = defaults.bool(forKey: Keys.outlineVisible)
+        suggestsLinks = defaults.object(forKey: Keys.suggestsLinks) as? Bool ?? true
+        marksBrokenLinks = defaults.object(forKey: Keys.marksBrokenLinks) as? Bool ?? true
 
         editor.onTextChange = { [weak self] newText in self?.textDidChange(newText) }
         editor.onCancel = { [weak self] in
@@ -174,6 +238,7 @@ final class AppModel {
         preview.onOpenURL = { [weak self] url in self?.openLink(url) }
         preview.onHighlightCount = { [weak self] count in self?.highlightCountChanged(count) }
         applyFontScale()
+        setUpLinks()
 
         Task { @MainActor [weak self] in self?.restoreSession() }
     }
@@ -348,6 +413,7 @@ final class AppModel {
             guard let self, !Task.isCancelled, self.rootURL == root else { return }
             if nodes != self.tree { self.tree = nodes }
             self.isScanning = false
+            self.gitProjectScanned()
         }
     }
 
@@ -362,6 +428,8 @@ final class AppModel {
 
     private func handleFileEvents(_ events: [DirectoryWatcher.Event]) {
         guard let root = rootURL?.path else { return }
+        linksHandleFileEvents(events, root: root)
+        gitFileEvents(events)
         var structural = false
         var currentChanged = false
         let current = currentFile?.path
@@ -389,7 +457,7 @@ final class AppModel {
         guard FileManager.default.fileExists(atPath: path) else { NSSound.beep(); return }
         let file = URL(fileURLWithPath: path)
         if FileScanner.isMarkdown(path: path) {
-            open(file)
+            openDocument(file, fragment: url.fragment(percentEncoded: false), inNewTab: preview.linkModifiers.contains(.command))
         } else if FileScanner.opensWithoutRunningCode(file) {
             NSWorkspace.shared.open(file)
         } else {
@@ -502,6 +570,7 @@ final class AppModel {
             try text.write(to: url, atomically: false, encoding: .utf8)
             savedText = text
             if saveError != nil { saveError = nil }
+            gitDocumentSaved()
         } catch {
             saveError = "Couldn’t save: \(error.localizedDescription)"
         }
@@ -520,13 +589,15 @@ final class AppModel {
         renderTask?.cancel()
         let source = text
         let base = currentFile?.deletingLastPathComponent()
+        let links = linkContext(for: source)
+        scheduleOutlineUpdate(debounce: debounce)
         renderTask = Task { [weak self] in
             if debounce {
                 try? await Task.sleep(nanoseconds: 90_000_000)
                 guard !Task.isCancelled else { return }
             }
             let (html, words) = await runDetached {
-                (MarkdownHTML.render(source), MarkdownHTML.wordCount(source))
+                (MarkdownHTML.render(source, links: links), MarkdownHTML.wordCount(source))
             }
             guard let self, !Task.isCancelled else { return }
             let reset = self.pendingScrollReset

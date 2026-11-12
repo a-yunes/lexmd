@@ -87,6 +87,30 @@ extension AppModel {
 
     // MARK: Commands
 
+    /// Opens a project document in the active tab (or the tab already showing it), or in a new tab.
+    func openPath(_ path: String, inNewTab: Bool) {
+        if inNewTab, currentFile != nil, rootURL.map({ path.hasPrefix($0.path + "/") }) == true {
+            reveal(path)
+            openInNewTab(path)
+        } else {
+            open(URL(fileURLWithPath: path))
+        }
+    }
+
+    /// Saves the active document and writes text that other tabs could not save before.
+    func saveAllTabs() {
+        saveNow()
+        for tab in tabStore.list.tabs where tab.id != tabStore.list.activeID {
+            guard let unsaved = tab.state.unsavedText else { continue }
+            do {
+                try unsaved.write(toFile: tab.path, atomically: false, encoding: .utf8)
+                tabStore.list.update(tab.id) { $0.state.unsavedText = nil }
+            } catch {
+                continue
+            }
+        }
+    }
+
     func openInNewTab(_ path: String) {
         guard currentFile != nil, tabStore.list.activeID != nil else {
             reveal(path)
@@ -141,7 +165,10 @@ extension AppModel {
     /// window, such as Settings, is in front).
     func performCloseCommand() {
         let mainWindow = editor.scrollView.window
-        if let key = NSApp.keyWindow, key !== mainWindow {
+        if let key = NSApp.keyWindow, key.sheetParent != nil || (key === mainWindow && key.attachedSheet != nil) {
+            // A sheet (such as Commit) is in front; it closes with its own buttons.
+            NSSound.beep()
+        } else if let key = NSApp.keyWindow, key !== mainWindow {
             key.performClose(nil)
         } else if currentFile != nil, let id = tabStore.list.activeID {
             closeTab(id)

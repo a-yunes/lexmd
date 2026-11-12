@@ -12,6 +12,11 @@ private func rewrite(_ text: String, at path: String, _ moves: [PathMove], wiki:
 
 private let rename = PathMove(from: "/p/notes.md", to: "/p/guide.md")
 
+/// Wiki renames for one move, given the project's documents after the move.
+private func wikiRenames(_ move: PathMove, files: [String], root: String = "/p") -> WikiRenames {
+    WikiRenames(root: root, moves: [move], markdownFiles: files, movedFiles: [(move.from, move.to)])
+}
+
 struct LinkRewriterTests {
     @Test func renameUpdatesLinksToTheFile() {
         #expect(rewrite("See [notes](notes.md).", at: "/p/index.md", [rename]) == "See [notes](guide.md).")
@@ -90,8 +95,7 @@ struct LinkRewriterTests {
           ```
         [[notes]] `[[notes]]`
         """
-        let result = rewrite(text, at: "/p/index.md", [rename], wiki: WikiRenames(
-            root: "/p", moved: [("/p/notes.md", "/p/guide.md")], otherFiles: []))
+        let result = rewrite(text, at: "/p/index.md", [rename], wiki: wikiRenames(rename, files: ["/p/index.md", "/p/guide.md"]))
         #expect(result.contains("Prose [a](guide.md)"))
         #expect(result.contains("`[b](notes.md)`"))
         #expect(result.contains("`[c](notes.md)`"))
@@ -143,26 +147,55 @@ struct LinkRewriterTests {
     }
 
     @Test func wikiLinksFollowRenames() {
-        let wiki = WikiRenames(root: "/p", moved: [("/p/docs/Old Name.md", "/p/docs/New Name.md")], otherFiles: ["/p/x.md"])
         let move = PathMove(from: "/p/docs/Old Name.md", to: "/p/docs/New Name.md")
+        let wiki = wikiRenames(move, files: ["/p/docs/New Name.md", "/p/x.md", "/p/Other.md"])
         let text = "[[Old Name]] [[old name|label]] [[Old Name#Heading]] [[Old Name#H|l]] ![[Old Name]] [[docs/Old Name]] [[Old Name.md]] [[Other]] [[#Local]]"
         #expect(rewrite(text, at: "/p/x.md", [move], wiki: wiki)
             == "[[New Name]] [[New Name|label]] [[New Name#Heading]] [[New Name#H|l]] ![[New Name]] [[docs/New Name]] [[New Name.md]] [[Other]] [[#Local]]")
         #expect(rewrite("| [[Old Name\\|alias]] |", at: "/p/x.md", [move], wiki: wiki) == "| [[New Name\\|alias]] |")
     }
 
-    @Test func wikiLinksFollowFolderMovesAndSkipAmbiguousNames() {
-        let folder = WikiRenames(root: "/p", moved: [("/p/docs/a.md", "/p/guides/a.md")], otherFiles: [])
-        #expect(folder.rename("docs/a") == "guides/a")
-        #expect(folder.rename("a") == nil, "the name did not change")
+    @Test func wikiLinksFollowFolderMoves() {
+        let move = PathMove(from: "/p/docs", to: "/p/guides")
+        let wiki = WikiRenames(root: "/p", moves: [move], markdownFiles: ["/p/guides/a.md", "/p/i.md"],
+                               movedFiles: [("/p/docs/a.md", "/p/guides/a.md"), ("/p/docs/pic.png", "/p/guides/pic.png")])
+        #expect(wiki.rename("docs/a", oldDocument: "/p/i.md", newDocument: "/p/i.md") == "guides/a")
+        #expect(wiki.rename("/docs/a", oldDocument: "/p/i.md", newDocument: "/p/i.md") == "/guides/a")
+        #expect(wiki.rename("a", oldDocument: "/p/i.md", newDocument: "/p/i.md") == nil, "the name still finds it")
+        #expect(wiki.rename("docs/pic.png", oldDocument: "/p/i.md", newDocument: "/p/i.md") == "guides/pic.png")
+        #expect(wiki.rename("pic.png", oldDocument: "/p/i.md", newDocument: "/p/i.md") == nil)
+    }
 
-        let ambiguous = WikiRenames(root: "/p", moved: [("/p/one/notes.md", "/p/one/guide.md")], otherFiles: ["/p/two/notes.md"])
-        #expect(ambiguous.rename("notes") == nil, "another notes.md still exists, so the bare link may mean it")
-        #expect(ambiguous.rename("one/notes") == "one/guide")
+    @Test func wikiLinksToAnotherFileWithTheSameNameStay() {
+        // Two notes.md: from /p/two/x.md the bare name means the closer one, which did not move.
+        let move = PathMove(from: "/p/one/notes.md", to: "/p/one/guide.md")
+        let wiki = wikiRenames(move, files: ["/p/one/guide.md", "/p/two/notes.md", "/p/two/x.md", "/p/one/y.md"])
+        #expect(wiki.rename("notes", oldDocument: "/p/two/x.md", newDocument: "/p/two/x.md") == nil)
+        #expect(wiki.rename("notes", oldDocument: "/p/one/y.md", newDocument: "/p/one/y.md") == "guide")
+        #expect(wiki.rename("one/notes", oldDocument: "/p/two/x.md", newDocument: "/p/two/x.md") == "one/guide")
+    }
 
-        let image = WikiRenames(root: "/p", moved: [("/p/img/pic.png", "/p/assets/pic.png")], otherFiles: [])
-        #expect(image.rename("img/pic.png") == "assets/pic.png")
-        #expect(image.rename("pic.png") == nil)
+    @Test func wikiLinkNeedsAFolderWhenTheNewNameIsTaken() {
+        // After the rename, a bare "b" would mean /p/b.md, so the link keeps a folder.
+        let move = PathMove(from: "/p/sub/a.md", to: "/p/sub/b.md")
+        let wiki = wikiRenames(move, files: ["/p/sub/b.md", "/p/b.md", "/p/x.md"])
+        #expect(wiki.rename("a", oldDocument: "/p/x.md", newDocument: "/p/x.md") == "sub/b")
+    }
+
+    @Test func mathAndFootnotesAreNeverRewritten() {
+        let wiki = wikiRenames(rename, files: ["/p/guide.md", "/p/i.md"])
+        let text = "Math $[a](notes.md)$ and $[[notes]]$, footnote[^notes] [[^notes]], then [[notes]] and [b](notes.md).\n\n$$\n[c](notes.md)\n$$\n\n[^notes]: See notes.md\n"
+        let result = rewrite(text, at: "/p/i.md", [rename], wiki: wiki)
+        #expect(result.contains("Math $[a](notes.md)$ and $[[notes]]$, footnote[^notes] [[^notes]], then [[guide]] and [b](guide.md)."))
+        #expect(result.contains("[c](notes.md)"))
+        #expect(result.contains("[^notes]: See notes.md"))
+    }
+
+    @Test func htmlIsLeftAlone() {
+        let text = "<div>\n[a](notes.md)\n</div>\n\nText <span>[[notes]]</span> [b](notes.md)\n"
+        let result = rewrite(text, at: "/p/i.md", [rename], wiki: wikiRenames(rename, files: ["/p/guide.md", "/p/i.md"]))
+        #expect(result.contains("<div>\n[a](notes.md)\n</div>"))
+        #expect(result.contains("[b](guide.md)"))
     }
 
     @Test func pathHelpers() {
@@ -235,8 +268,8 @@ struct LinkUpdaterTests {
         try folder.writePNG("guides/p.png")
         let move = PathMove(from: root + "/docs", to: root + "/guides")
         let context = LinkUpdater.context(root: root, move: move, markdownFiles: [root + "/guides/a.md", root + "/i.md"])
-        #expect(context.wiki.rename("docs/a") == "guides/a")
-        #expect(context.wiki.rename("docs/p.png") == "guides/p.png")
+        #expect(context.wiki.rename("docs/a", oldDocument: root + "/i.md", newDocument: root + "/i.md") == "guides/a")
+        #expect(context.wiki.rename("docs/p.png", oldDocument: root + "/i.md", newDocument: root + "/i.md") == "guides/p.png")
         #expect(rewrite("[a](docs/a.md) ![p](docs/p.png)", at: root + "/i.md", context.moves, wiki: context.wiki)
             == "[a](guides/a.md) ![p](guides/p.png)")
     }

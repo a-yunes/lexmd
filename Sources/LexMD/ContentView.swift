@@ -10,6 +10,7 @@ struct ContentView: View {
             if model.sidebarPosition == .right {
                 // macOS split views keep the sidebar leading, so a trailing tree uses the inspector column.
                 DetailView()
+                    .outlinePanel(.leading)
                     .toolbar { detailToolbar(trailingSidebar: true) }
                     .inspector(isPresented: $model.isInspectorPresented) {
                         SidebarView(inInspector: true)
@@ -21,6 +22,7 @@ struct ContentView: View {
                         .navigationSplitViewColumnWidth(min: 210, ideal: 270, max: 440)
                 } detail: {
                     DetailView()
+                        .outlinePanel(.trailing)
                         .toolbar { detailToolbar(trailingSidebar: false) }
                 }
             }
@@ -52,6 +54,7 @@ struct ContentView: View {
             model.open(url)
             return true
         }
+        .modifier(CommitSheetPresenter())
     }
 }
 
@@ -62,8 +65,16 @@ extension ContentView {
             DocumentTitle()
         }
         ToolbarSpacer(.flexible)
+        if model.showsCommitButton {
+            ToolbarItem(placement: .primaryAction) {
+                CommitToolbarButton()
+            }
+        }
         ToolbarItem(placement: .primaryAction) {
             ViewModePicker()
+        }
+        ToolbarItem(placement: .primaryAction) {
+            OutlineToolbarButton()
         }
         if trailingSidebar {
             ToolbarItem(placement: .primaryAction) {
@@ -265,6 +276,7 @@ struct FileRow: View {
                         Image(systemName: "folder")
                     }
                     Spacer(minLength: 0)
+                    GitBadgeView(path: node.id, isFolder: true)
                 }
                 .padding(.leading, indent)
                 .contentShape(Rectangle())
@@ -289,6 +301,7 @@ struct FileRow: View {
                     Image(systemName: "doc.text")
                 }
                 Spacer(minLength: 0)
+                GitBadgeView(path: node.id, isFolder: false)
             }
             .padding(.leading, indent)
             .tag(node.id)

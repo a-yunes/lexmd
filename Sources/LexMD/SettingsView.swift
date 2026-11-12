@@ -43,6 +43,7 @@ private struct GeneralSettings: View {
                     Text("A folder that holds just one item is merged into it, so a lone README.md inside “guides” shows as one row: guides › README.")
                 }
             }
+            EditorSettingsSection()
             Section("Tabs") {
                 Toggle(isOn: Binding(get: { model.tabStore.alwaysShowTabBar }, set: { model.tabStore.alwaysShowTabBar = $0 })) {
                     Text("Always show tab bar")
@@ -53,6 +54,24 @@ private struct GeneralSettings: View {
                 Toggle(isOn: $model.loadsRemoteContent) {
                     Text("Load images from the web")
                     Text("Images and videos hosted online load from their servers, which can see when you open a document. Local images always show.")
+                }
+            }
+            Section("Links") {
+                Toggle(isOn: $model.suggestsLinks) {
+                    Text("Suggest links while typing")
+                    Text("After ](, # in a link, or [[, the editor lists matching documents, images, and headings.")
+                }
+                Toggle(isOn: $model.marksBrokenLinks) {
+                    Text("Mark broken links in the preview")
+                    Text("Links to files or headings that don’t exist are underlined in red. Web links are never checked.")
+                }
+            }
+            if model.showsGitCommands {
+                Section("Source Control") {
+                    Toggle(isOn: $model.showGitStatus) {
+                        Text("Show git status")
+                        Text("Marks changed files in the sidebar. LexMD runs Git only on this Mac and never contacts remotes.")
+                    }
                 }
             }
         }
@@ -116,7 +135,7 @@ private struct ShortcutSettings: View {
     var body: some View {
         VStack(spacing: 0) {
             Form {
-                ForEach(ShortcutAction.Category.allCases, id: \.self) { category in
+                ForEach(ShortcutAction.Category.allCases.filter { $0 != .sourceControl || model.showsGitCommands }, id: \.self) { category in
                     Section(category.rawValue) {
                         ForEach(ShortcutAction.allCases.filter { $0.category == category }) { action in
                             LabeledContent(action.title) {

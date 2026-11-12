@@ -2,17 +2,32 @@ import Foundation
 import Markdown
 
 enum MarkdownHTML {
-    static func render(_ source: String) -> String {
+    /// `links` resolves wiki links and marks broken local links; without it they render as text.
+    static func render(_ source: String, links: LinkContext? = nil) -> String {
         var body = source
         var prefix = ""
         if let (frontMatter, rest) = splitFrontMatter(source) {
-            prefix = "<pre class=\"frontmatter\"><code>\(escape(frontMatter))</code></pre>\n"
+            prefix = FrontMatter.html(frontMatter) ?? "<pre class=\"frontmatter\"><code>\(escape(frontMatter))</code></pre>\n"
             body = rest
         }
-        let document = Document(parsing: body)
+        return prefix + renderBody(body, footnotes: true, links: links)
+    }
+
+    /// Renders Markdown with math, diagrams, and optionally footnotes (see `MarkdownExtensions`).
+    /// Footnote bodies get the same link context, so their wiki links and broken links render too.
+    static func renderBody(_ source: String, footnotes: Bool, links: LinkContext? = nil) -> String {
+        let extensions = MarkdownExtensions(source, footnotes: footnotes)
+        let document = Document(parsing: extensions.source)
         var renderer = HTMLRenderer()
+        renderer.extensions = extensions
+        renderer.links = links
         renderer.visit(document)
-        return prefix + renderer.result
+        return extensions.finish(renderer.result) + extensions.footnotesHTML { renderBody($0, footnotes: false, links: links) }
+    }
+
+    /// Fenced code in these languages is drawn as a diagram by the preview.
+    static func isDiagram(_ language: String) -> Bool {
+        ["mermaid", "pele"].contains(language.lowercased())
     }
 
     static func wordCount(_ source: String) -> Int {
@@ -60,10 +75,13 @@ enum MarkdownHTML {
 
 private struct HTMLRenderer: MarkupWalker {
     var result = ""
+    var links: LinkContext?
+    private var linkDepth = 0
     private var slugCounts: [String: Int] = [:]
     private var inTableHead = false
     private var alignments: [Table.ColumnAlignment?] = []
     private var column = 0
+    var extensions = MarkdownExtensions("")
 
     private func esc(_ s: String) -> String { MarkdownHTML.escape(s) }
 
@@ -91,7 +109,7 @@ private struct HTMLRenderer: MarkupWalker {
     // MARK: Blocks
 
     mutating func visitHeading(_ heading: Heading) {
-        let id = slug(for: heading.plainText)
+        let id = slug(for: extensions.restore(heading.plainText))
         let inner = capture(heading)
         result += "<h\(heading.level) id=\"\(esc(id))\">\(inner)</h\(heading.level)>\n"
     }
@@ -121,9 +139,14 @@ private struct HTMLRenderer: MarkupWalker {
         let language = codeBlock.language?.trimmingCharacters(in: .whitespaces).split(separator: " ").first.map(String.init) ?? ""
         var code = codeBlock.code
         if code.hasSuffix("\n") { code.removeLast() }
+        if language.lowercased() == "math" {
+            result += MarkdownExtensions.html(for: .math(tex: code, display: true, source: code), block: true) + "\n"
+            return
+        }
         let langClass = language.isEmpty ? "" : " class=\"language-\(esc(language))\""
         let label = language.isEmpty ? "" : "<span class=\"lang\">\(esc(language))</span>"
-        result += "<div class=\"codeblock\">\(label)<button class=\"copy\" type=\"button\">Copy</button><pre><code\(langClass)>\(esc(code))</code></pre></div>\n"
+        let block = "<div class=\"codeblock\">\(label)<button class=\"copy\" type=\"button\">Copy</button><pre><code\(langClass)>\(esc(code))</code></pre></div>"
+        result += MarkdownHTML.isDiagram(language) ? "<div class=\"lexmd-diagram\">\(block)</div>\n" : block + "\n"
     }
 
     mutating func visitHTMLBlock(_ html: HTMLBlock) {
@@ -195,6 +218,10 @@ private struct HTMLRenderer: MarkupWalker {
     // MARK: Inlines
 
     mutating func visitText(_ text: Text) {
+        if linkDepth == 0, links != nil {
+            result += links!.html(forText: text.string, restore: extensions.restore)
+            return
+        }
         result += esc(text.string)
     }
 
@@ -215,15 +242,20 @@ private struct HTMLRenderer: MarkupWalker {
     }
 
     mutating func visitLink(_ link: Link) {
-        let href = link.destination.map { " href=\"\(esc($0))\"" } ?? ""
-        let title = link.title.map { " title=\"\(esc($0))\"" } ?? ""
-        result += "<a\(href)\(title)>\(capture(link))</a>"
+        let destination = link.destination.map { extensions.restore($0) }
+        let href = destination.map { " href=\"\(esc($0))\"" } ?? ""
+        let title = link.title.map { " title=\"\(esc(extensions.restore($0)))\"" } ?? ""
+        var linkClass = ""
+        if let destination { linkClass = links?.linkClass(forDestination: destination) ?? "" }
+        linkDepth += 1
+        result += "<a\(href)\(title)\(linkClass)>\(capture(link))</a>"
+        linkDepth -= 1
     }
 
     mutating func visitImage(_ image: Image) {
-        let src = image.source.map { " src=\"\(esc($0))\"" } ?? ""
-        let title = image.title.map { " title=\"\(esc($0))\"" } ?? ""
-        result += "<img\(src) alt=\"\(esc(image.plainText))\"\(title) loading=\"lazy\">"
+        let src = image.source.map { " src=\"\(esc(extensions.restore($0)))\"" } ?? ""
+        let title = image.title.map { " title=\"\(esc(extensions.restore($0)))\"" } ?? ""
+        result += "<img\(src) alt=\"\(esc(extensions.restore(image.plainText)))\"\(title) loading=\"lazy\">"
     }
 
     mutating func visitInlineHTML(_ inlineHTML: InlineHTML) {

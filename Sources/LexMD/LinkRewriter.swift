@@ -30,19 +30,19 @@ struct TextEdit: Equatable, Sendable {
     }
 }
 
-/// A link target found in Markdown source.
-struct LinkOccurrence: Equatable {
-    enum Kind: Equatable { case inline, reference, wiki }
+/// The exact source range of a link destination, for rewriting it in place.
+struct MarkdownLinkSpan: Equatable {
+    enum Kind: Equatable { case inline, reference }
     var kind: Kind
-    /// The destination (for wiki links, the target name), without angle brackets.
+    /// The destination without angle brackets.
     var range: NSRange
     var isAngle = false
 }
 
 // MARK: - Scanner
 
-/// Finds link destinations in Markdown while skipping front matter, fenced and indented code,
-/// and code spans.
+/// Finds the exact ranges of link destinations while skipping front matter, fenced and indented
+/// code, and code spans. Wiki links are skipped here; `WikiLink.parse(in:)` finds those.
 enum MarkdownLinkScanner {
     private struct Line {
         var start: Int
@@ -54,13 +54,13 @@ enum MarkdownLinkScanner {
     private static let openParen: UInt16 = 40, closeParen: UInt16 = 41
     private static let lessThan: UInt16 = 60, greaterThan: UInt16 = 62
     private static let space: UInt16 = 32, tab: UInt16 = 9, newline: UInt16 = 10, carriageReturn: UInt16 = 13
-    private static let colon: UInt16 = 58, pipe: UInt16 = 124, hash: UInt16 = 35, caret: UInt16 = 94
+    private static let colon: UInt16 = 58, caret: UInt16 = 94
 
-    static func links(in text: String) -> [LinkOccurrence] {
+    static func links(in text: String) -> [MarkdownLinkSpan] {
         let s = Array(text.utf16)
         let lines = lineRanges(s)
         let prose = proseLines(s, lines)
-        var result: [LinkOccurrence] = []
+        var result: [MarkdownLinkSpan] = []
         var segment: (start: Int, end: Int)?
         for (index, line) in lines.enumerated() {
             if prose[index], !isBlank(s, line) {
@@ -199,7 +199,7 @@ enum MarkdownLinkScanner {
     }
 
     /// `[label]: destination` at the start of a line. Footnotes (`[^1]:`) are not links.
-    private static func referenceDefinition(_ s: [UInt16], _ line: Line) -> LinkOccurrence? {
+    private static func referenceDefinition(_ s: [UInt16], _ line: Line) -> MarkdownLinkSpan? {
         var i = line.start
         var spaces = 0
         while i < line.end, s[i] == space, spaces < 4 { i += 1; spaces += 1 }
@@ -218,14 +218,14 @@ enum MarkdownLinkScanner {
             var j = i + 1
             while j < line.end, s[j] != greaterThan, s[j] != lessThan { j += s[j] == backslash ? 2 : 1 }
             guard j < line.end, s[j] == greaterThan else { return nil }
-            return LinkOccurrence(kind: .reference, range: NSRange(location: i + 1, length: j - i - 1), isAngle: true)
+            return MarkdownLinkSpan(kind: .reference, range: NSRange(location: i + 1, length: j - i - 1), isAngle: true)
         }
         var j = i
         while j < line.end, s[j] > space { j += 1 }
-        return LinkOccurrence(kind: .reference, range: NSRange(location: i, length: j - i))
+        return MarkdownLinkSpan(kind: .reference, range: NSRange(location: i, length: j - i))
     }
 
-    private static func scanInline(_ s: [UInt16], from start: Int, to end: Int, into result: inout [LinkOccurrence]) {
+    private static func scanInline(_ s: [UInt16], from start: Int, to end: Int, into result: inout [MarkdownLinkSpan]) {
         var openers: [Int] = []
         var i = start
         while i < end {
@@ -244,8 +244,7 @@ enum MarkdownLinkScanner {
             } else if c == lessThan, let close = autolinkEnd(s, from: i, to: end) {
                 i = close + 1
             } else if c == openBracket, i + 1 < end, s[i + 1] == openBracket, let wiki = wikiLink(s, from: i, to: end) {
-                if let occurrence = wiki.occurrence { result.append(occurrence) }
-                i = wiki.end
+                i = wiki
             } else if c == openBracket {
                 openers.append(i)
                 i += 1
@@ -254,7 +253,7 @@ enum MarkdownLinkScanner {
                 guard openers.popLast() != nil else { continue }
                 guard i < end, s[i] == openParen, let link = inlineDestination(s, from: i + 1, to: end) else { continue }
                 if link.range.length > 0 {
-                    result.append(LinkOccurrence(kind: .inline, range: link.range, isAngle: link.isAngle))
+                    result.append(MarkdownLinkSpan(kind: .inline, range: link.range, isAngle: link.isAngle))
                 }
                 i = link.end
             } else {
@@ -289,10 +288,9 @@ enum MarkdownLinkScanner {
         return nil
     }
 
-    /// `[[target#heading|label]]`; the occurrence covers only the target.
-    private static func wikiLink(_ s: [UInt16], from start: Int, to end: Int) -> (occurrence: LinkOccurrence?, end: Int)? {
+    /// The end of a `[[...]]` wiki link, which is skipped so it is not read as a link.
+    private static func wikiLink(_ s: [UInt16], from start: Int, to end: Int) -> Int? {
         var i = start + 2
-        var targetEnd: Int?
         while i + 1 < end {
             let c = s[i]
             if c == newline || c == openBracket { return nil }
@@ -300,16 +298,10 @@ enum MarkdownLinkScanner {
                 guard s[i + 1] == closeBracket else { return nil }
                 break
             }
-            if targetEnd == nil {
-                if c == pipe || c == hash { targetEnd = i }
-                if c == backslash, s[i + 1] == pipe { targetEnd = i }
-            }
             i += 1
         }
         guard i + 1 < end, s[i] == closeBracket, s[i + 1] == closeBracket, i > start + 2 else { return nil }
-        let targetStop = targetEnd ?? i
-        let range = NSRange(location: start + 2, length: targetStop - start - 2)
-        return (range.length > 0 ? LinkOccurrence(kind: .wiki, range: range) : nil, i + 2)
+        return i + 2
     }
 
     private static func skipWhitespace(_ s: [UInt16], _ i: inout Int, _ end: Int) {
@@ -372,82 +364,86 @@ enum MarkdownLinkScanner {
 
 // MARK: - Rewriting
 
-/// How wiki link targets change when files are renamed or moved.
+/// How wiki link targets change when files are renamed or moved. Document targets resolve with
+/// `WikiLinkResolver`, as the preview and backlinks do: a link is rewritten when it named a moved
+/// document before the move and no longer does, and the new text is the shortest form that names
+/// it after the move.
 struct WikiRenames: Sendable {
-    struct Entry: Sendable {
-        /// Paths relative to the project root; Markdown files without their extension.
+    /// A moved attachment (an image, for example), relative to the project root.
+    struct Attachment: Sendable {
         var oldPath: String
         var newPath: String
     }
 
-    var entries: [Entry] = []
-    /// Lowercased names that other files share, so bare `[[Name]]` links to them are ambiguous.
-    var ambiguousNames: Set<String> = []
-
-    /// Builds the table from moved files (absolute paths) and the files left in place.
-    init(root: String, moved: [(old: String, new: String)], otherFiles: [String]) {
-        entries = moved.compactMap { pair in
-            guard let old = Self.wikiPath(pair.old, root: root), let new = Self.wikiPath(pair.new, root: root) else { return nil }
-            return Entry(oldPath: old, newPath: new)
-        }
-        let movedNames = Set(entries.map { Self.lastComponent($0.oldPath).lowercased() })
-        let otherNames = Set(otherFiles.compactMap { Self.wikiPath($0, root: root) }.map { Self.lastComponent($0).lowercased() })
-        ambiguousNames = movedNames.intersection(otherNames)
-    }
+    private var root = ""
+    private var moves: [PathMove] = []
+    private var before: WikiLinkResolver?
+    private var after: WikiLinkResolver?
+    private var attachments: [Attachment] = []
 
     init() {}
 
-    static func wikiPath(_ path: String, root: String) -> String? {
-        guard path.hasPrefix(root + "/") else { return nil }
-        let relative = String(path.dropFirst(root.count + 1))
-        return FileScanner.isMarkdown(path: relative) ? (relative as NSString).deletingPathExtension : relative
-    }
-
-    private static func lastComponent(_ path: String) -> String {
-        path.split(separator: "/").last.map(String.init) ?? path
-    }
-
-    /// The new target for a wiki link target, or nil when it does not change.
-    func rename(_ target: String) -> String? {
-        guard !entries.isEmpty else { return nil }
-        var name = target.trimmingCharacters(in: .whitespaces)
-        var leadingSlash = ""
-        if name.hasPrefix("/") {
-            leadingSlash = "/"
-            name.removeFirst()
+    /// `markdownFiles` are the project's documents at their current (moved) locations;
+    /// `movedFiles` lists every moved file by old and new absolute path.
+    init(root: String, moves: [PathMove], markdownFiles: [String], movedFiles: [(old: String, new: String)]) {
+        self.root = root
+        self.moves = moves
+        let oldPaths = markdownFiles.map { path in moves.lazy.compactMap { $0.inverse.map(path) }.first ?? path }
+        before = WikiLinkResolver(root: root, paths: oldPaths)
+        after = WikiLinkResolver(root: root, paths: markdownFiles)
+        attachments = movedFiles.compactMap { pair in
+            guard !FileScanner.isMarkdown(path: pair.old), pair.old.hasPrefix(root + "/"), pair.new.hasPrefix(root + "/") else { return nil }
+            return Attachment(oldPath: String(pair.old.dropFirst(root.count + 1)), newPath: String(pair.new.dropFirst(root.count + 1)))
         }
+    }
+
+    /// The new target for a wiki link in a document that was at `oldDocument` and is now at
+    /// `newDocument`, or nil when the link needs no change.
+    func rename(_ target: String, oldDocument: String, newDocument: String) -> String? {
+        guard let before, let after else { return nil }
+        let trimmed = target.trimmingCharacters(in: .whitespaces)
+        if FileOperations.hasExtension(trimmed), !FileScanner.isMarkdown(path: trimmed) {
+            return renameAttachment(trimmed)
+        }
+        guard let old = before.resolve(trimmed, from: oldDocument),
+              let new = moves.lazy.compactMap({ $0.map(old) }).first,
+              new.hasPrefix(root + "/") else { return nil }
+        // Still names the same document after the move: leave it as written.
+        if after.resolve(trimmed, from: newDocument) == new { return nil }
         var suffix = ""
+        var name = trimmed
         if FileScanner.isMarkdown(path: name) {
             suffix = "." + (name as NSString).pathExtension
             name = (name as NSString).deletingPathExtension
         }
-        guard !name.isEmpty else { return nil }
-        let lower = name.lowercased()
-        let replacement: String
-        if lower.contains("/") {
-            let matches = entries.filter {
-                let old = $0.oldPath.lowercased()
-                return old == lower || old.hasSuffix("/" + lower)
-            }
-            guard matches.count == 1, let entry = matches.first else { return nil }
-            if entry.oldPath.lowercased() == lower {
-                guard entry.oldPath != entry.newPath else { return nil }
-                replacement = entry.newPath
-            } else {
-                let count = lower.split(separator: "/").count
-                let oldSuffix = entry.oldPath.split(separator: "/").suffix(count).joined(separator: "/")
-                replacement = entry.newPath.split(separator: "/").suffix(count).joined(separator: "/")
-                guard oldSuffix != replacement else { return nil }
-            }
+        let relative = WikiLinkResolver.stem(String(new.dropFirst(root.count + 1)))
+        let candidates: [String]
+        if name.hasPrefix("/") {
+            candidates = ["/" + relative]
+        } else if name.contains("/") {
+            let count = name.split(separator: "/").count
+            candidates = [relative.split(separator: "/").suffix(count).joined(separator: "/"), relative]
         } else {
-            guard !ambiguousNames.contains(lower) else { return nil }
-            let matches = entries.filter { Self.lastComponent($0.oldPath).lowercased() == lower }
-            guard matches.count == 1, let entry = matches.first,
-                  Self.lastComponent(entry.oldPath) != Self.lastComponent(entry.newPath) else { return nil }
-            replacement = Self.lastComponent(entry.newPath)
+            candidates = [(relative as NSString).lastPathComponent, relative]
         }
-        guard replacement != name else { return nil }
-        return leadingSlash + replacement + suffix
+        let chosen = candidates.first { after.resolve($0, from: newDocument) == new } ?? relative
+        return chosen == name ? nil : chosen + suffix
+    }
+
+    private func renameAttachment(_ target: String) -> String? {
+        var name = target
+        var leading = ""
+        if name.hasPrefix("/") { leading = "/"; name.removeFirst() }
+        let lower = name.lowercased()
+        let matches = attachments.filter {
+            let old = $0.oldPath.lowercased()
+            return old == lower || old.hasSuffix("/" + lower)
+        }
+        guard matches.count == 1, let entry = matches.first else { return nil }
+        let count = lower.split(separator: "/").count
+        let oldSuffix = entry.oldPath.split(separator: "/").suffix(count).joined(separator: "/")
+        let replacement = entry.newPath.split(separator: "/").suffix(count).joined(separator: "/")
+        return oldSuffix == replacement ? nil : leading + replacement
     }
 }
 
@@ -470,26 +466,34 @@ enum LinkRewriter {
 
     /// Edits that keep a document's links pointing at the same files after the moves.
     /// `oldPath` is where the document was; `newPath` is where it is now.
+    ///
+    /// Inline links count only where the Markdown parser sees a link too, so links in code, raw
+    /// HTML, math, and footnote references are never touched. Wiki links come from
+    /// `WikiLink.parse(in:)`, which skips the same places and `[[^1]]` footnotes.
     static func edits(in text: String, oldPath: String, newPath: String, context: Context) -> [TextEdit] {
+        let spans = MarkdownLinkScanner.links(in: text)
+        guard !spans.isEmpty || text.contains("[[") else { return [] }
         let ns = text as NSString
+        let structure = DocumentStructure.analyze(text)
+        let parsedLinks = structure.links.filter { $0.kind != .wiki }.map(\.range)
         let oldDirectory = (oldPath as NSString).deletingLastPathComponent
         let newDirectory = (newPath as NSString).deletingLastPathComponent
         var edits: [TextEdit] = []
-        for link in MarkdownLinkScanner.links(in: text) {
-            let raw = ns.substring(with: link.range)
-            let replacement: String?
-            switch link.kind {
-            case .inline, .reference:
-                replacement = rewriteDestination(raw, isAngle: link.isAngle, oldDirectory: oldDirectory,
-                                                 newDirectory: newDirectory, context: context)
-            case .wiki:
-                replacement = context.wiki.rename(raw)
-            }
-            if let replacement, replacement != raw {
-                edits.append(TextEdit(range: link.range, replacement: replacement))
+        for span in spans {
+            if span.kind == .inline, !parsedLinks.contains(where: { NSIntersectionRange($0, span.range) == span.range }) { continue }
+            let raw = ns.substring(with: span.range)
+            if let replacement = rewriteDestination(raw, isAngle: span.isAngle, oldDirectory: oldDirectory,
+                                                    newDirectory: newDirectory, context: context), replacement != raw {
+                edits.append(TextEdit(range: span.range, replacement: replacement))
             }
         }
-        return edits
+        for link in structure.links.compactMap(\.wiki) where link.targetRange.length > 0 {
+            let raw = ns.substring(with: link.targetRange)
+            if let replacement = context.wiki.rename(raw, oldDocument: oldPath, newDocument: newPath), replacement != raw {
+                edits.append(TextEdit(range: link.targetRange, replacement: replacement))
+            }
+        }
+        return edits.sorted { $0.range.location < $1.range.location }
     }
 
     static func isExternal(_ destination: String) -> Bool {
@@ -711,8 +715,8 @@ enum LinkUpdater {
         } else {
             moved.append((move.from, move.to))
         }
-        let others = markdownFiles.filter { move.inverse.map($0) == nil }
-        return LinkRewriter.Context(moves: [move], wiki: WikiRenames(root: root, moved: moved, otherFiles: others))
+        let wiki = WikiRenames(root: root, moves: [move], markdownFiles: markdownFiles, movedFiles: moved)
+        return LinkRewriter.Context(moves: [move], wiki: wiki)
     }
 
     /// Counts the links that would change. `overrides` holds unsaved text for open documents.
