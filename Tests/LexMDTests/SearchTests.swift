@@ -53,3 +53,15 @@ struct SearchTests {
         #expect(FileScanner.scan(folder.url).count == 50)
     }
 }
+
+struct OpenQuicklyNameTests {
+    @Test func queriesWithTheExtensionMatchFileNames() {
+        let files = [
+            SearchableFile(path: "/p/README.md", name: "README.md", folder: ""),
+            SearchableFile(path: "/p/docs/guide.markdown", name: "guide.markdown", folder: "docs"),
+        ]
+        #expect(QuickSearchEngine.fuzzyFiles(query: "readme.md", files: files).first?.path == "/p/README.md")
+        #expect(QuickSearchEngine.fuzzyFiles(query: "readme", files: files).first?.path == "/p/README.md")
+        #expect(QuickSearchEngine.fuzzyFiles(query: "docs/guide.markdown", files: files).first?.path == "/p/docs/guide.markdown")
+    }
+}

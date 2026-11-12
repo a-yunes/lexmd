@@ -119,8 +119,16 @@ extension AppModel {
         scheduleQuickSearch(debounce: false)
     }
 
+    /// New Tab: Open Quickly for files, and the chosen file opens in a new tab.
+    func newTab() {
+        guard rootURL != nil else { showOpenPanel(); return }
+        toggleQuickSearch(mode: .files)
+        quickOpensInNewTab = true
+    }
+
     func closeQuickSearch() {
         isQuickSearchVisible = false
+        quickOpensInNewTab = false
         quickTask?.cancel()
         if let monitor = quickKeyMonitor {
             NSEvent.removeMonitor(monitor)
@@ -167,8 +175,8 @@ extension AppModel {
 
     func activateQuickItem(at index: Int, inNewTab: Bool = false) {
         guard let item = quickItem(at: index) else { NSSound.beep(); return }
+        let newTab = inNewTab || quickOpensInNewTab || NSEvent.modifierFlags.contains(.command)
         closeQuickSearch()
-        let newTab = inNewTab || NSEvent.modifierFlags.contains(.command)
         switch item {
         case .file(let file):
             reveal(file.path)

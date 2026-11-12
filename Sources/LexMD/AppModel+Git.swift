@@ -56,15 +56,26 @@ final class GitModel {
     func commitTarget(currentFile: String?) -> GitRepository? {
         guard isActive else { return nil }
         if let currentFile { return repository(containing: currentFile) }
-        return repositories.first { !(snapshots[$0.root]?.changes.isEmpty ?? true) } ?? repositories.first
+        return repositories.first { hasDocumentChanges($0) } ?? repositories.first
     }
 
-    func canCommit(currentFile: String?) -> Bool { commitTarget(currentFile: currentFile) != nil }
+    /// Whether the repository has Markdown or image changes to commit.
+    func hasDocumentChanges(_ repository: GitRepository) -> Bool {
+        !(snapshots[repository.root]?.documentChanges.isEmpty ?? true)
+    }
 
-    /// The toolbar button shows only when the target repository has changes.
+    /// Commit is offered only when the target repository has document changes. Without a
+    /// status snapshot (status off or not loaded yet) it stays available and the sheet checks.
+    func canCommit(currentFile: String?) -> Bool {
+        guard let target = commitTarget(currentFile: currentFile) else { return false }
+        guard snapshots[target.root] != nil else { return true }
+        return hasDocumentChanges(target)
+    }
+
+    /// The toolbar button shows only when the target repository has document changes.
     func showsCommitButton(currentFile: String?) -> Bool {
         guard showsStatus, let target = commitTarget(currentFile: currentFile) else { return false }
-        return !(snapshots[target.root]?.changes.isEmpty ?? true)
+        return hasDocumentChanges(target)
     }
 
     func badge(for path: String) -> GitChangeKind? { showsStatus ? badges[path] : nil }

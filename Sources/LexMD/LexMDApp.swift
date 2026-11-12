@@ -119,6 +119,7 @@ struct LexMDCommands: Commands {
             }
         }
         CommandGroup(replacing: .saveItem) {
+            item(.newTab) { model.newTab() }
             item(.closeTab) { model.performCloseCommand() }
             item(.reopenClosedTab, disabled: !model.canReopenClosedTab) { model.reopenClosedTab() }
             Divider()

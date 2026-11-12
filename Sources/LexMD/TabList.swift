@@ -189,6 +189,6 @@ final class TabStore {
     var draggingID: UUID?
 
     init() {
-        alwaysShowTabBar = UserDefaults.standard.bool(forKey: AppModel.Keys.alwaysShowTabBar)
+        alwaysShowTabBar = UserDefaults.standard.object(forKey: AppModel.Keys.alwaysShowTabBar) as? Bool ?? true
     }
 }

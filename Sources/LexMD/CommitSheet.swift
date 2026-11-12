@@ -47,7 +47,7 @@ final class CommitSession: Identifiable {
         reload()
     }
 
-    var changes: [GitFileChange] { snapshot?.changes ?? [] }
+    var changes: [GitFileChange] { snapshot?.documentChanges ?? [] }
     var selectedChanges: [GitFileChange] { changes.filter { checked.contains($0.path) } }
 
     var branchLabel: String {
@@ -102,9 +102,9 @@ final class CommitSession: Identifiable {
                 if self.identityName.isEmpty { self.identityName = identity?.name ?? "" }
                 if self.identityEmail.isEmpty { self.identityEmail = identity?.email ?? "" }
             }
-            let changes = snapshot?.changes ?? []
-            // Markdown files start checked; everything else waits for the user.
-            self.checked = Set(changes.filter { self.userChoices[$0.path] ?? $0.isMarkdown }.map(\.path))
+            let changes = snapshot?.documentChanges ?? []
+            let defaults = GitStatusSnapshot.checkedByDefault(changes)
+            self.checked = Set(changes.filter { self.userChoices[$0.path] ?? defaults.contains($0.path) }.map(\.path))
             if let selection = self.selection, changes.contains(where: { $0.path == selection }) {
                 self.loadDiff()
             } else {
@@ -390,7 +390,7 @@ struct CommitSheet: View {
                     ContentUnavailableView(
                         session.loadFailed ? "Status Unavailable" : "No Changes",
                         systemImage: session.loadFailed ? "exclamationmark.triangle" : "checkmark.circle",
-                        description: Text(session.loadFailed ? "Git could not read this repository." : "Everything is committed.")
+                        description: Text(session.loadFailed ? "Git could not read this repository." : "No Markdown or image changes to commit.")
                     )
                 }
             }

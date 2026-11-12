@@ -206,8 +206,10 @@ enum QuickSearchEngine {
         var matches: [FileMatch] = []
         for file in files {
             let base = (file.name as NSString).deletingPathExtension
-            let nameMatch = fuzzy(compact, in: base)
-            let pathMatch = file.folder.isEmpty ? nil : fuzzy(compact, in: file.folder + "/" + base)
+            // A query that includes the extension ("readme.md") matches the full name.
+            let nameMatch = fuzzy(compact, in: base) ?? fuzzy(compact, in: file.name)
+            let pathMatch = file.folder.isEmpty ? nil
+                : fuzzy(compact, in: file.folder + "/" + base) ?? fuzzy(compact, in: file.folder + "/" + file.name)
             // Prefer a match on the name; fall back to the folder path (shown without letter highlights).
             if let (score, indices) = nameMatch, pathMatch.map({ score >= $0.0 - 6 }) ?? true {
                 matches.append(FileMatch(path: file.path, name: base, folder: file.folder, score: score, matched: indices))

@@ -1,8 +1,11 @@
 import AppKit
+import OSLog
 
 /// Document tabs. One editor and one preview are shared; switching tabs saves the outgoing
 /// document, then loads the incoming one and restores its view state.
 extension AppModel {
+    static let tabLog = Logger(subsystem: "io.github.a-yunes.lexmd", category: "tabs")
+
     var showsTabBar: Bool {
         let count = tabStore.list.count
         return rootURL != nil && (count > 1 || (count == 1 && tabStore.alwaysShowTabBar))
@@ -112,12 +115,17 @@ extension AppModel {
     }
 
     func openInNewTab(_ path: String) {
+        Self.tabLog.notice("Open in new tab: \(path, privacy: .private)")
         guard currentFile != nil, tabStore.list.activeID != nil else {
+            Self.tabLog.notice("No active tab; opening in place")
             reveal(path)
             selectedPath = path
             return
         }
-        guard path != currentFile?.path else { return }
+        guard path != currentFile?.path else {
+            Self.tabLog.notice("Already showing this document")
+            return
+        }
         if let existing = tabStore.list.tab(withPath: path) {
             selectTab(existing.id)
             return
@@ -131,6 +139,7 @@ extension AppModel {
         if isFindBarVisible { hideFindBarQuietly() }
         load(URL(fileURLWithPath: path))
         guard currentFile?.path == path else {
+            Self.tabLog.error("The new tab's document did not load")
             tabStore.list.close(tab.id, remember: false)
             if let previous { tabStore.list.activate(previous) }
             (history, historyIndex) = savedHistory

@@ -497,3 +497,33 @@ struct GitVisibilityTests {
         #expect(model.badge(for: root + "/notes.md") == nil)
     }
 }
+
+/// LexMD offers only documents and their images for commit.
+struct GitDocumentChangeTests {
+    private func change(_ path: String, _ kind: GitChangeKind) -> GitFileChange {
+        GitFileChange(path: path, index: ".", worktree: "M", kind: kind)
+    }
+
+    @Test func onlyMarkdownAndImagesAreOffered() {
+        var snapshot = GitStatusSnapshot()
+        snapshot.changes = [
+            change(".DS_Store", .untracked), change("skills/.DS_Store", .untracked),
+            change("Sources/App.swift", .modified), change("README.md", .modified),
+            change("docs/guide.markdown", .added), change("docs/assets/shot.png", .untracked),
+        ]
+        #expect(snapshot.documentChanges.map(\.path) == ["README.md", "docs/guide.markdown", "docs/assets/shot.png"])
+
+        var noise = GitStatusSnapshot()
+        noise.changes = [change(".DS_Store", .untracked), change("Package.swift", .modified)]
+        #expect(noise.documentChanges.isEmpty)
+    }
+
+    @Test func newImagesNearChangedDocumentsStartChecked() {
+        let changes = [
+            change("docs/guide.md", .modified), change("docs/assets/new.png", .untracked),
+            change("art/logo.png", .untracked), change("docs/old.png", .modified),
+        ]
+        #expect(GitStatusSnapshot.checkedByDefault(changes) == ["docs/guide.md", "docs/assets/new.png"])
+        #expect(GitStatusSnapshot.checkedByDefault([change("a.png", .untracked)]).isEmpty)
+    }
+}

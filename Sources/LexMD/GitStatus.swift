@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// How a file differs from the last commit, reduced to what LexMD shows.
 enum GitChangeKind: String, Sendable, CaseIterable {
@@ -50,6 +51,11 @@ struct GitFileChange: Sendable, Hashable, Identifiable {
     var id: String { path }
     var name: String { (path as NSString).lastPathComponent }
     var isMarkdown: Bool { FileScanner.isMarkdown(path: path) }
+    var isImage: Bool {
+        UTType(filenameExtension: (path as NSString).pathExtension)?.conforms(to: .image) ?? false
+    }
+    /// LexMD commits documents and the images they use; other files are left to other tools.
+    var isDocumentChange: Bool { isMarkdown || isImage }
     /// Paths a commit of this change has to include (both sides of a rename).
     var commitPaths: [String] { originalPath.map { [path, $0] } ?? [path] }
 }
@@ -62,6 +68,20 @@ struct GitStatusSnapshot: Sendable, Equatable {
     var changes: [GitFileChange] = []
 
     var hasConflicts: Bool { changes.contains { $0.kind == .conflicted } }
+    /// The changes LexMD offers to commit: Markdown files and images.
+    var documentChanges: [GitFileChange] { changes.filter(\.isDocumentChange) }
+
+    /// Markdown starts checked, and so do new images next to or below a changed Markdown file,
+    /// such as pasted images in an assets folder. Other images wait for the user.
+    static func checkedByDefault(_ changes: [GitFileChange]) -> Set<String> {
+        let folders = Set(changes.filter(\.isMarkdown).map { ($0.path as NSString).deletingLastPathComponent })
+        return Set(changes.filter { change in
+            if change.isMarkdown { return true }
+            guard change.isImage, change.kind == .added || change.kind == .untracked else { return false }
+            let folder = (change.path as NSString).deletingLastPathComponent
+            return folders.contains { $0.isEmpty || folder == $0 || folder.hasPrefix($0 + "/") }
+        }.map(\.path))
+    }
 }
 
 /// Parses `git status --porcelain=v2 -z --branch`.

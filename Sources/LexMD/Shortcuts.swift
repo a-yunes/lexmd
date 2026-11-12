@@ -104,6 +104,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case bold, italic, strikethrough, inlineCode, link
     case newFolder, renameItem, duplicateItem, moveToTrash
     case closeTab, reopenClosedTab, showNextTab, showPreviousTab
+    case newTab
     case formatTable
     case focusMode, typewriterScrolling
     case commit
@@ -126,7 +127,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .toggleSidebar, .editorOnly, .split, .previewOnly, .expandAll, .collapseAll, .zoomIn, .zoomOut, .zoomReset: .view
         case .toggleOutline: .view
         case .bold, .italic, .strikethrough, .inlineCode, .link: .format
-        case .newFolder, .renameItem, .duplicateItem, .moveToTrash, .closeTab, .reopenClosedTab: .file
+        case .newFolder, .renameItem, .duplicateItem, .moveToTrash, .closeTab, .reopenClosedTab, .newTab: .file
         case .showNextTab, .showPreviousTab: .navigate
         case .formatTable: .format
         case .focusMode, .typewriterScrolling: .view
@@ -168,6 +169,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .duplicateItem: "Duplicate"
         case .moveToTrash: "Move to Trash"
         case .closeTab: "Close Tab"
+        case .newTab: "New Tab"
         case .reopenClosedTab: "Reopen Closed Tab"
         case .showNextTab: "Show Next Tab"
         case .showPreviousTab: "Show Previous Tab"
@@ -216,6 +218,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .duplicateItem: ""
         case .moveToTrash: ""
         case .closeTab: "cmd+w"
+        case .newTab: "cmd+t"
         case .reopenClosedTab: "shift+cmd+t"
         case .showNextTab: "ctrl+tab"
         case .showPreviousTab: "ctrl+shift+tab"

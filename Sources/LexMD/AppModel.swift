@@ -125,6 +125,8 @@ final class AppModel {
 
     // Find in Files
     var isQuickSearchVisible = false
+    /// Set by New Tab: the file picked in Open Quickly opens in a new tab.
+    var quickOpensInNewTab = false
     var quickMode: QuickMode = .everything
     var quickQuery = "" {
         didSet { if quickQuery != oldValue { scheduleQuickSearch() } }

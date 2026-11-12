@@ -9,7 +9,20 @@ struct DocumentTabBar: View {
 
     var body: some View {
         if model.showsTabBar {
-            TabStrip()
+            HStack(spacing: 0) {
+                TabStrip()
+                Button { model.newTab() } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("New Tab \(model.shortcut(for: .newTab).map { "(\($0.display))" } ?? "")")
+                .accessibilityLabel("New Tab")
+                .padding(.trailing, 4)
+            }
                 .frame(height: 30)
                 .background(.bar)
                 .overlay(alignment: .bottom) { Divider() }
