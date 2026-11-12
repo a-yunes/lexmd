@@ -31,7 +31,7 @@ extension EditorController {
             self, selector: #selector(featureClipFrameDidChange(_:)),
             name: NSView.frameDidChangeNotification, object: scrollView.contentView
         )
-        setSpellChecking(spelling: true, grammar: false)
+        setSpellChecking(spelling: false, grammar: false)
     }
 
     @objc private func featureSelectionDidChange(_ notification: Notification) {
@@ -185,7 +185,9 @@ extension EditorController {
     /// Keeps spelling and grammar marks off code, URLs, and front matter.
     func textView(_ textView: NSTextView, shouldSetSpellingState value: Int, range affectedCharRange: NSRange) -> Int {
         guard value != 0 else { return value }
-        return Self.isExcludedFromSpelling(affectedCharRange, in: textView.string as NSString, blocks: blocks) ? 0 : value
+        // The storage's own string: bridging `textView.string` would copy the whole document per call.
+        guard let string = textView.textStorage?.mutableString else { return value }
+        return Self.isExcludedFromSpelling(affectedCharRange, in: string, blocks: blocks) ? 0 : value
     }
 
     private static let spellingExclusions = try! NSRegularExpression(pattern: [
@@ -204,10 +206,13 @@ extension EditorController {
         if blocks.items.contains(where: { $0.kind != .comment && NSIntersectionRange($0.range, range).length > 0 }) {
             return true
         }
+        // Search only the affected lines, never the whole document.
         let lines = string.lineRange(for: range)
+        let text = string.substring(with: lines)
+        let local = NSRange(location: range.location - lines.location, length: range.length)
         var excluded = false
-        spellingExclusions.enumerateMatches(in: string as String, range: lines) { match, _, stop in
-            guard let match, NSIntersectionRange(match.range, range).length > 0 else { return }
+        spellingExclusions.enumerateMatches(in: text, range: NSRange(location: 0, length: (text as NSString).length)) { match, _, stop in
+            guard let match, NSIntersectionRange(match.range, local).length > 0 else { return }
             excluded = true
             stop.pointee = true
         }

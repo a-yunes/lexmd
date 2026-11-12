@@ -152,6 +152,29 @@ extension AppModel {
     // MARK: Move
 
     /// Moves items dropped on a folder. Items from outside the project are opened instead.
+    /// Asks for a folder inside the project, then moves the item there (offering link updates).
+    func chooseMoveDestination(for url: URL) {
+        guard let root = rootURL else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = url.deletingLastPathComponent()
+        panel.prompt = "Move"
+        panel.message = "Choose a folder in \(root.lastPathComponent) to move \(url.lastPathComponent) to."
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        let target = FileScanner.canonicalPath(folder.path)
+        guard target == root.path || target.hasPrefix(root.path + "/") else {
+            let alert = NSAlert()
+            alert.messageText = "Choose a folder inside the project"
+            alert.informativeText = "LexMD moves files only within \(root.lastPathComponent)."
+            present(alert) { _ in }
+            return
+        }
+        _ = moveItems([url], into: folder)
+    }
+
     @discardableResult
     func moveItems(_ urls: [URL], into folder: URL) -> Bool {
         guard let root = rootURL?.path else { return false }

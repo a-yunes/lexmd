@@ -91,7 +91,7 @@ final class AppModel {
     var imageFolder = "assets" {
         didSet { defaults.set(imageFolder, forKey: Keys.imageFolder) }
     }
-    var checksSpelling = true {
+    var checksSpelling = false {
         didSet { defaults.set(checksSpelling, forKey: Keys.checksSpelling); applyEditorSettings() }
     }
     var checksGrammar = false {
@@ -219,7 +219,7 @@ final class AppModel {
         sidebarPosition = SidebarPosition(rawValue: defaults.string(forKey: Keys.sidebarPosition) ?? "") ?? .left
         appearanceMode = AppearanceMode(rawValue: defaults.string(forKey: Keys.appearance) ?? "") ?? .system
         imageFolder = defaults.string(forKey: Keys.imageFolder) ?? "assets"
-        checksSpelling = defaults.object(forKey: Keys.checksSpelling) as? Bool ?? true
+        checksSpelling = defaults.object(forKey: Keys.checksSpelling) as? Bool ?? false
         checksGrammar = defaults.bool(forKey: Keys.checksGrammar)
         focusMode = defaults.bool(forKey: Keys.focusMode)
         typewriterScrolling = defaults.bool(forKey: Keys.typewriterScrolling)

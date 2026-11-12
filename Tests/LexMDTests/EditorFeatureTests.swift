@@ -423,7 +423,7 @@ struct EditorFeatureTests {
         #expect(harness.editor.responds(to: #selector(NSTextViewDelegate.textView(_:shouldSetSpellingState:range:))))
         #expect(harness.editor.textView(view, shouldSetSpellingState: 1, range: text.range(of: "wrld")) == 0)
         #expect(harness.editor.textView(view, shouldSetSpellingState: 1, range: text.range(of: "Helo")) == 1)
-        #expect(view.isContinuousSpellCheckingEnabled)
+        #expect(!view.isContinuousSpellCheckingEnabled, "off by default, as checking a whole document on load is costly")
         #expect(!view.isGrammarCheckingEnabled)
     }
 

@@ -37,6 +37,7 @@ struct FileActionMenuItems: View {
         Divider()
         Button("Rename") { model.beginRename(url) }
         Button("Duplicate") { model.duplicateItem(url) }
+        Button("Move To…") { model.chooseMoveDestination(for: url) }
         Button("Move to Trash") { model.confirmMoveToTrash(url) }
         Divider()
     }
@@ -57,7 +58,8 @@ struct SidebarBackgroundMenu: View {
 }
 
 extension View {
-    /// Lets a row be dragged, and a folder row (or a file row, for its folder) take dropped items.
+    /// Lets a folder row (or a file row, for its folder) take items dropped from Finder. Rows are not
+    /// draggable: a drag source makes the list select on mouse-up, which slows switching documents.
     func sidebarDragAndDrop(_ node: FileNode) -> some View {
         modifier(SidebarDragAndDrop(node: node))
     }
@@ -72,7 +74,6 @@ private struct SidebarDragAndDrop: ViewModifier {
     func body(content: Content) -> some View {
         let isFolder = node.children != nil
         content
-            .onDrag { NSItemProvider(object: node.url as NSURL) }
             .dropDestination(for: URL.self) { urls, _ in
                 model.moveItems(urls, into: isFolder ? node.url : node.url.deletingLastPathComponent())
             } isTargeted: { targeted in
