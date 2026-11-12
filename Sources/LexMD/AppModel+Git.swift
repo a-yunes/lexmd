@@ -179,7 +179,9 @@ final class GitModel {
             Int(event.flags) & structural != 0
                 && ((event.path as NSString).lastPathComponent == ".git" || event.path.hasSuffix("/.git/HEAD"))
         }
-        if changesRepository { scheduleDiscover() }
+        // A repository's configuration changed; discovery rereads the settings status uses.
+        let changesConfig = events.contains { $0.path.hasSuffix("/.git/config") }
+        if changesRepository || changesConfig { scheduleDiscover() }
         scheduleStatus(after: 1)
     }
 

@@ -51,28 +51,45 @@ struct GitFileChange: Sendable, Hashable, Identifiable {
     var id: String { path }
     var name: String { (path as NSString).lastPathComponent }
     var isMarkdown: Bool { FileScanner.isMarkdown(path: path) }
-    var isImage: Bool {
-        UTType(filenameExtension: (path as NSString).pathExtension)?.conforms(to: .image) ?? false
-    }
+    var isImage: Bool { Self.isImage(path: path) }
+    /// A rename (not a copy) with both of its paths known.
+    var isRename: Bool { originalPath != nil && (index == "R" || worktree == "R") }
+    /// A rename whose old path was a Markdown file.
+    var renamesMarkdown: Bool { isRename && FileScanner.isMarkdown(path: originalPath ?? "") }
     /// LexMD commits documents and the images they use; other files are left to other tools.
-    var isDocumentChange: Bool { isMarkdown || isImage }
+    /// A rename counts when either side is a document, so renaming a document to another type
+    /// can still be committed.
+    var isDocumentChange: Bool {
+        Self.isDocument(path: path) || (isRename && Self.isDocument(path: originalPath ?? ""))
+    }
     /// Paths a commit of this change has to include: both sides of a rename. The source of a
     /// copy is left out, since committing it would also commit its own unrelated edits.
     var commitPaths: [String] {
-        guard let originalPath, index == "R" || worktree == "R" else { return [path] }
+        guard isRename, let originalPath else { return [path] }
         return [path, originalPath]
+    }
+
+    static func isImage(path: String) -> Bool {
+        UTType(filenameExtension: (path as NSString).pathExtension)?.conforms(to: .image) ?? false
+    }
+
+    static func isDocument(path: String) -> Bool {
+        FileScanner.isMarkdown(path: path) || isImage(path: path)
     }
 
     /// The document changes among `changes`, resolving each file extension's type only once.
     static func documents(in changes: [GitFileChange]) -> [GitFileChange] {
         var isImageExtension: [String: Bool] = [:]
-        return changes.filter { change in
-            if change.isMarkdown { return true }
-            let ext = (change.path as NSString).pathExtension.lowercased()
+        func isDocument(_ path: String) -> Bool {
+            if FileScanner.isMarkdown(path: path) { return true }
+            let ext = (path as NSString).pathExtension.lowercased()
             if let known = isImageExtension[ext] { return known }
             let image = UTType(filenameExtension: ext)?.conforms(to: .image) ?? false
             isImageExtension[ext] = image
             return image
+        }
+        return changes.filter { change in
+            isDocument(change.path) || (change.isRename && isDocument(change.originalPath ?? ""))
         }
     }
 }
@@ -104,12 +121,13 @@ struct GitStatusSnapshot: Sendable, Equatable {
 
     var hasConflicts: Bool { changes.contains { $0.kind == .conflicted } }
 
-    /// Markdown starts checked, and so do new images next to or below a changed Markdown file,
-    /// such as pasted images in an assets folder. Other images wait for the user.
+    /// Markdown starts checked (including a Markdown file renamed to another type), and so do
+    /// new images next to or below a changed Markdown file, such as pasted images in an assets
+    /// folder. Other images wait for the user.
     static func checkedByDefault(_ changes: [GitFileChange]) -> Set<String> {
         let folders = Set(changes.filter(\.isMarkdown).map { ($0.path as NSString).deletingLastPathComponent })
         return Set(changes.filter { change in
-            if change.isMarkdown { return true }
+            if change.isMarkdown || change.renamesMarkdown { return true }
             guard change.isImage, change.kind == .added || change.kind == .untracked else { return false }
             let folder = (change.path as NSString).deletingLastPathComponent
             return folders.contains { $0.isEmpty || folder == $0 || folder.hasPrefix($0 + "/") }
@@ -193,6 +211,9 @@ enum GitStatusParser {
 struct GitRepository: Sendable, Hashable, Identifiable {
     /// Absolute, symlink-resolved path of the working tree root.
     let root: String
+    /// False when the repository sets `status.showUntrackedFiles` to `no`; status then leaves
+    /// untracked files out, as git itself does. Read when repositories are discovered.
+    var showsUntrackedFiles = true
 
     var id: String { root }
     var name: String { (root as NSString).lastPathComponent }
@@ -208,7 +229,7 @@ enum GitDiscovery {
     static func repositories(git: Git, projectRoot: String, folders: [String]) -> [GitRepository] {
         var result: [GitRepository] = []
         if let top = toplevel(git: git, directory: projectRoot) {
-            result.append(GitRepository(root: top))
+            result.append(repository(git: git, root: top))
         }
         let manager = FileManager.default
         for folder in folders.sorted() where folder != projectRoot {
@@ -217,9 +238,21 @@ enum GitDiscovery {
             let resolved = FileScanner.canonicalPath(folder)
             guard !result.contains(where: { $0.root == resolved }),
                   toplevel(git: git, directory: folder) == resolved else { continue }
-            result.append(GitRepository(root: resolved))
+            result.append(repository(git: git, root: resolved))
         }
         return result
+    }
+
+    /// A discovered repository with the settings status depends on.
+    static func repository(git: Git, root: String) -> GitRepository {
+        let setting = git.run(["config", "--get", "status.showUntrackedFiles"], in: root, timeout: 10)
+        return GitRepository(root: root, showsUntrackedFiles: !(setting.succeeded && hidesUntracked(setting.line)))
+    }
+
+    /// Whether a `status.showUntrackedFiles` value turns untracked files off: `no`, or any
+    /// spelling git reads as false.
+    static func hidesUntracked(_ value: String) -> Bool {
+        ["no", "false", "off", "0"].contains(value.trimmingCharacters(in: .whitespaces).lowercased())
     }
 
     static func toplevel(git: Git, directory: String) -> String? {
@@ -232,7 +265,9 @@ enum GitDiscovery {
     /// The status of `repository`, limited to `projectRoot` when the repository encloses it.
     static func status(git: Git, repository: GitRepository, projectRoot: String, timeout: TimeInterval = 30) -> GitStatusSnapshot? {
         var arguments = [
-            "status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all", "--ignore-submodules=all",
+            "status", "--porcelain=v2", "-z", "--branch",
+            repository.showsUntrackedFiles ? "--untracked-files=all" : "--untracked-files=no",
+            "--ignore-submodules=all",
             // Ahead and behind counts walk history and can take seconds; LexMD does not show them.
             "--no-ahead-behind",
         ]

@@ -508,6 +508,51 @@ struct GitEdgeCaseTests {
         #expect(try repo.status().changes.isEmpty)
     }
 
+    @Test func commitsAMarkdownFileRenamedToAnotherType() throws {
+        let repo = try TestRepo()
+        try repo.write("notes.md", "# Notes\n")
+        try repo.write("other.md", "other\n")
+        try repo.run("add", "-A")
+        try repo.run("commit", "-q", "-m", "initial")
+        try repo.run("mv", "notes.md", "notes.txt")
+        try repo.write("other.md", "changed\n")
+
+        let snapshot = try repo.status()
+        let renamed = try #require(snapshot.documentChanges.first { $0.path == "notes.txt" })
+        #expect(renamed.originalPath == "notes.md")
+        let result = GitOperations.commit(git: repo.git, repository: repo.root, changes: [renamed], message: "Rename\n")
+        #expect((try? result.get()) != nil)
+        #expect(Set(repo.lines("show", "--no-renames", "--name-only", "--format=", "HEAD")) == ["notes.md", "notes.txt"])
+        #expect(repo.lines("ls-files") == ["notes.txt", "other.md"])
+        #expect(try repo.status().changes.map(\.path) == ["other.md"], "other.md was not committed")
+    }
+
+    @Test func respectsShowUntrackedFilesNo() throws {
+        let repo = try TestRepo()
+        try repo.write("tracked.md", "a\n")
+        try repo.run("add", "tracked.md")
+        try repo.run("commit", "-q", "-m", "initial")
+        try repo.write("tracked.md", "b\n")
+        try repo.write("untracked.md", "new\n")
+
+        #expect(GitDiscovery.repositories(git: repo.git, projectRoot: repo.root, folders: [])
+            == [GitRepository(root: repo.root, showsUntrackedFiles: true)])
+        #expect(try repo.status().changes.map(\.path).sorted() == ["tracked.md", "untracked.md"])
+
+        for value in ["no", "false", "Off"] {
+            try repo.run("config", "status.showUntrackedFiles", value)
+            let found = GitDiscovery.repositories(git: repo.git, projectRoot: repo.root, folders: [])
+            #expect(found == [GitRepository(root: repo.root, showsUntrackedFiles: false)], "\(value)")
+            let repository = try #require(found.first)
+            let snapshot = try #require(GitDiscovery.status(git: repo.git, repository: repository, projectRoot: repo.root))
+            #expect(snapshot.changes.map(\.path) == ["tracked.md"])
+        }
+        for value in ["normal", "all"] {
+            try repo.run("config", "status.showUntrackedFiles", value)
+            #expect(GitDiscovery.repository(git: repo.git, root: repo.root).showsUntrackedFiles, "\(value)")
+        }
+    }
+
     @Test func failedAddLeavesNoFilesStaged() throws {
         let repo = try TestRepo()
         try repo.write("a.md", "a\n")
@@ -606,6 +651,20 @@ struct GitVisibilityTests {
         #expect(model.canCommit(currentFile: repoDir + "/inside.md"), "committing works without badges")
     }
 
+    @Test func rereadsShowUntrackedFilesWhenTheConfigurationChanges() async throws {
+        let repo = try TestRepo()
+        try repo.write("new.md", "new\n")
+        let model = GitModel()
+        try await scanned(model, repo.root)
+        try await waitUntil(seconds: 60) { model.badge(for: repo.root + "/new.md") == .untracked }
+
+        try repo.run("config", "status.showUntrackedFiles", "no")
+        let modified = FSEventStreamEventFlags(kFSEventStreamEventFlagItemRenamed | kFSEventStreamEventFlagItemIsFile)
+        model.fileEvents([DirectoryWatcher.Event(path: repo.root + "/.git/config", flags: modified)])
+        try await waitUntil(seconds: 60) { model.repositories.first?.showsUntrackedFiles == false }
+        try await waitUntil(seconds: 60) { model.badge(for: repo.root + "/new.md") == nil }
+    }
+
     @Test func redetectsRepositoriesCreatedOrRemovedInTheProject() async throws {
         let folder = try TestFolder()
         let root = FileScanner.canonicalPath(folder.url.path)
@@ -647,6 +706,21 @@ struct GitDocumentChangeTests {
         var noise = GitStatusSnapshot()
         noise.changes = [change(".DS_Store", .untracked), change("Package.swift", .modified)]
         #expect(noise.documentChanges.isEmpty)
+    }
+
+    @Test func renamesCountWhenEitherSideIsADocument() {
+        let toText = GitFileChange(path: "notes.txt", originalPath: "notes.md", index: "R", worktree: ".", kind: .renamed)
+        let toMarkdown = GitFileChange(path: "draft.md", originalPath: "draft.txt", index: "R", worktree: ".", kind: .renamed)
+        let imageAway = GitFileChange(path: "shot.bak", originalPath: "shot.png", index: "R", worktree: ".", kind: .renamed)
+        let neither = GitFileChange(path: "b.txt", originalPath: "a.txt", index: "R", worktree: ".", kind: .renamed)
+        let copy = GitFileChange(path: "copy.txt", originalPath: "source.md", index: "C", worktree: ".", kind: .added)
+        let snapshot = GitStatusSnapshot(changes: [toText, toMarkdown, imageAway, neither, copy])
+        #expect(snapshot.documentChanges.map(\.path) == ["notes.txt", "draft.md", "shot.bak"])
+        #expect(snapshot.documentChanges == snapshot.changes.filter(\.isDocumentChange))
+        #expect(toText.commitPaths == ["notes.txt", "notes.md"])
+        #expect(copy.commitPaths == ["copy.txt"], "copies stay excluded")
+        #expect(GitStatusSnapshot.checkedByDefault(snapshot.documentChanges) == ["notes.txt", "draft.md"],
+                "a renamed Markdown file starts checked; a renamed image waits for the user")
     }
 
     @Test func newImagesNearChangedDocumentsStartChecked() {
