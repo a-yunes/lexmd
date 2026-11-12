@@ -45,6 +45,11 @@ final class EditorController: NSObject, NSTextViewDelegate {
     /// Runs first for every key command; returns true when it handled it (link completion).
     var onCommand: ((Selector) -> Bool)?
     private var hasFindHighlights = false
+    /// The text's own undo history, separate from the window's, which holds file operations
+    /// (rename, move, trash) that must outlive document switches and reloads.
+    let undoManager = UndoManager()
+    /// Changes with every edit of the text, including loads and reloads.
+    private(set) var textVersion = 0
     /// Multi-line constructs from the last full highlight, kept in step with edits.
     private(set) var blocks: MarkdownBlocks?
     /// The text edited since the last highlight, when only that part needs restyling.
@@ -280,6 +285,10 @@ final class EditorController: NSObject, NSTextViewDelegate {
 
     // MARK: Delegate
 
+    func undoManager(for view: NSTextView) -> UndoManager? {
+        undoManager
+    }
+
     func textDidChange(_ notification: Notification) {
         highlight(full: false)
         onTextChange?(textView.string)
@@ -356,8 +365,9 @@ final class EditorController: NSObject, NSTextViewDelegate {
     /// Records each text edit so the next highlight restyles only the edited paragraphs.
     /// Edits that can open, close, or move a multi-line block fall back to a full pass.
     @objc private func storageDidProcessEditing(_ notification: Notification) {
-        guard let storage = textView.textStorage, storage.editedMask.contains(.editedCharacters),
-              !needsFullHighlight else { return }
+        guard let storage = textView.textStorage, storage.editedMask.contains(.editedCharacters) else { return }
+        textVersion &+= 1
+        guard !needsFullHighlight else { return }
         let edited = storage.editedRange
         let delta = storage.changeInLength
         let old = NSRange(location: edited.location, length: max(0, edited.length - delta))

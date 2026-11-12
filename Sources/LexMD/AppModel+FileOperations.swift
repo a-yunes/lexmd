@@ -23,7 +23,9 @@ final class LinkWriteRecord {
 }
 
 extension AppModel {
-    var fileUndoManager: UndoManager? { editor.textView.undoManager ?? NSApp.mainWindow?.undoManager }
+    /// The window's undo manager. The editor keeps text undo in its own manager, which document
+    /// loads clear, so file operations register on the responders around it instead.
+    var fileUndoManager: UndoManager? { editor.scrollView.undoManager ?? NSApp.mainWindow?.undoManager }
 
     /// Refreshes backlinks, link checks, and git badges right after a file operation, without
     /// waiting for file system events. `changed` lists files whose contents changed in place.

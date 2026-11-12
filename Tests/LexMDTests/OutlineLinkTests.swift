@@ -462,6 +462,23 @@ struct OutlineLinkTests {
         #expect(builds == 4)
     }
 
+    @Test func suggestionsRefreshWhenLateResultsArrive() {
+        let editor = EditorController()
+        let completion = EditorCompletion(textView: editor.textView)
+        var titles = ["Alpha"]
+        completion.provider = { _ in titles.map { CompletionItem(id: $0, kind: .heading, title: $0, insertion: $0) } }
+        editor.load("")
+        editor.textView.insertText("[[", replacementRange: NSRange(location: 0, length: 0))
+        #expect(completion.list.items.map(\.title) == ["Alpha"])
+        titles = ["Alpha", "Beta"]
+        completion.refresh()
+        #expect(completion.list.items.map(\.title) == ["Alpha", "Beta"])
+        completion.dismiss(suppress: false)
+        titles = ["Gamma"]
+        completion.refresh()
+        #expect(completion.list.items.isEmpty, "nothing reopens once the list is closed")
+    }
+
     @Test func returnContinuesListsUnlessSuggestionsShow() {
         let editor = EditorController()
         let completion = EditorCompletion(textView: editor.textView)

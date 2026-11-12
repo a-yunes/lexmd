@@ -128,6 +128,17 @@ final class EditorCompletion: NSObject {
         if list.items.isEmpty { hidePanel() } else { showPanel() }
     }
 
+    /// Asks the provider again for the link target being completed, for suggestions that
+    /// became available after the last keystroke.
+    func refresh() {
+        guard let context, !isAccepting, isEnabled() else { return }
+        let items = Array((provider?(context) ?? []).prefix(60))
+        guard items != list.items else { return }
+        list.items = items
+        list.selection = 0
+        if items.isEmpty { hidePanel() } else { showPanel() }
+    }
+
     private func move(by step: Int) {
         let count = list.items.count
         guard count > 0 else { return }
