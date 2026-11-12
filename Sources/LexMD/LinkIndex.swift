@@ -442,23 +442,29 @@ struct LinkContext: Sendable {
     }
 
     /// The preview markup for the text of one Markdown text run, with wiki links as links.
-    mutating func html(forText text: String) -> String {
-        let links = WikiLink.scan(text)
+    ///
+    /// The text may hold math and footnote placeholders (see `MarkdownExtensions`); `restore`
+    /// turns them back into source. A placeholder in a link's target means the brackets belong
+    /// to math or a footnote, so it stays text. One in the label stays, so the math renders.
+    mutating func html(forText text: String, restore: (String) -> String = { $0 }) -> String {
+        let links = WikiLink.scan(text).filter { !MarkdownExtensions.containsToken($0.target) }
         guard !links.isEmpty else { return MarkdownHTML.escape(text) }
         let ns = text as NSString
         var out = ""
         var last = 0
-        for link in links {
+        for var link in links {
             out += MarkdownHTML.escape(ns.substring(with: NSRange(location: last, length: link.range.location - last)))
-            out += html(for: link)
+            let label = link.label
+            link.heading = link.heading.map(restore)
+            out += html(for: link, label: label)
             last = NSMaxRange(link.range)
         }
         out += MarkdownHTML.escape(ns.substring(from: last))
         return out
     }
 
-    private mutating func html(for link: WikiLink) -> String {
-        let label = MarkdownHTML.escape(link.label)
+    private mutating func html(for link: WikiLink, label rawLabel: String) -> String {
+        let label = MarkdownHTML.escape(rawLabel)
         let (found, path) = resolve(link)
         guard found, let path else {
             let title = MarkdownHTML.escape("No document named “\(link.target)”")

@@ -100,6 +100,7 @@ struct LexMDCommands: Commands {
             .disabled(model.recentFolders.isEmpty)
         }
         CommandGroup(after: .pasteboard) {
+            item(.copyRichText, disabled: !model.canExport) { model.copyRichText() }
             Divider()
             Menu("Find") {
                 item(.find) { model.showFind() }
@@ -113,6 +114,12 @@ struct LexMDCommands: Commands {
             item(.save) { model.saveNow() }
             Divider()
             item(.revealInFinder) { model.revealCurrentInFinder() }
+            Divider()
+            item(.exportPDF, disabled: !model.canExport) { model.exportPDF() }
+            item(.exportHTML, disabled: !model.canExport) { model.exportHTML() }
+        }
+        CommandGroup(replacing: .printItem) {
+            item(.printDocument, disabled: !model.canExport) { model.printDocument() }
         }
         CommandGroup(before: .sidebar) {
             item(.toggleSidebar) { model.toggleSidebar() }
@@ -134,6 +141,15 @@ struct LexMDCommands: Commands {
             item(.zoomReset) { model.zoom(by: 0) }
             Divider()
         }
+        CommandGroup(before: .sidebar) {
+            Toggle(ShortcutAction.focusMode.title, isOn: Binding(get: { model.focusMode }, set: { model.focusMode = $0 }))
+                .keyboardShortcut(model.keyboardShortcut(.focusMode))
+            Toggle(ShortcutAction.typewriterScrolling.title, isOn: Binding(
+                get: { model.typewriterScrolling }, set: { model.typewriterScrolling = $0 }
+            ))
+            .keyboardShortcut(model.keyboardShortcut(.typewriterScrolling))
+            Divider()
+        }
         CommandMenu("Go") {
             item(.goBack, disabled: !model.canGoBack) { model.goBack() }
             item(.goForward, disabled: !model.canGoForward) { model.goForward() }
@@ -144,6 +160,13 @@ struct LexMDCommands: Commands {
             item(.strikethrough) { model.editor.wrapSelection("~~", "~~") }
             item(.inlineCode) { model.editor.wrapSelection("`", "`") }
             item(.link) { model.editor.insertLink() }
+            Divider()
+            item(.formatTable) { model.editor.formatTable() }
+        }
+        if model.showsGitCommands {
+            CommandMenu("Source Control") {
+                item(.commit, disabled: !model.canCommitCurrentDocument) { model.showCommitSheet() }
+            }
         }
     }
 }

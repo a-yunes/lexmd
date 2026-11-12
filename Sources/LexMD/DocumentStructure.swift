@@ -42,11 +42,25 @@ struct DocumentStructure: Sendable {
         walker.visit(Document(parsing: body))
         var result = walker.structure
 
-        // Wiki links live in plain text, so code, raw HTML, and front matter are skipped.
+        // Math and footnote references render in place of their source (see MarkdownExtensions),
+        // so headings and links inside them do not exist in the preview.
+        let extensions = MarkdownExtensions(body)
+        let replaced = utf16Ranges(extensions.itemRanges, in: body).map {
+            NSRange(location: $0.location + frontMatterLength, length: $0.length)
+        }
+        if !replaced.isEmpty {
+            result.headings.removeAll { heading in replaced.contains { contains($0, heading.range) } }
+            result.links.removeAll { link in replaced.contains { overlapsPartly(link.range, $0) } }
+        }
+        assignSlugs(&result.headings, extensions: extensions)
+
+        // Wiki links live in plain text, so code, raw HTML, and front matter are skipped, and so
+        // is any link whose target is math or that math cuts through.
         var masked = walker.masked
         if frontMatterLength > 0 { masked.append(NSRange(location: 0, length: frontMatterLength)) }
         masked.sort { $0.location < $1.location }
         for link in WikiLink.scan(source) where !overlaps(link.range, masked) {
+            guard !replaced.contains(where: { overlapsPartly(link.range, $0) || NSIntersectionRange($0, link.targetRange).length > 0 }) else { continue }
             result.links.append(LinkOccurrence(
                 kind: .wiki, destination: link.target, wiki: link,
                 line: lines.line(at: link.range.location), range: link.range
@@ -67,6 +81,49 @@ struct DocumentStructure: Sendable {
             return (lines[(i + 1)...].joined(separator: "\n"), i + 1, length)
         }
         return (source, 0, 0)
+    }
+
+    /// Heading ids as the preview assigns them: from the heading text with math as written.
+    private static func assignSlugs(_ headings: inout [HeadingInfo], extensions: MarkdownExtensions) {
+        if !extensions.items.isEmpty {
+            var collector = HeadingTextCollector()
+            collector.visit(Document(parsing: extensions.source))
+            if collector.titles.count == headings.count {
+                for index in headings.indices { headings[index].title = extensions.restore(collector.titles[index]) }
+            }
+        }
+        var slugger = HeadingSlugger()
+        for index in headings.indices { headings[index].slug = slugger.slug(for: headings[index].title) }
+    }
+
+    private static func contains(_ outer: NSRange, _ inner: NSRange) -> Bool {
+        inner.location >= outer.location && NSMaxRange(inner) <= NSMaxRange(outer)
+    }
+
+    /// Overlapping without strictly holding the other: a link inside math or a footnote
+    /// reference, or math that starts inside a link and ends after it. A link holding whole
+    /// math (a math label) is fine.
+    private static func overlapsPartly(_ range: NSRange, _ other: NSRange) -> Bool {
+        NSIntersectionRange(range, other).length > 0 && !(contains(range, other) && range != other)
+    }
+
+    /// Converts sorted UTF-8 byte ranges of `text` to UTF-16 ranges in one pass.
+    private static func utf16Ranges(_ ranges: [Range<Int>], in text: String) -> [NSRange] {
+        guard !ranges.isEmpty else { return [] }
+        let targets = Set(ranges.flatMap { [$0.lowerBound, $0.upperBound] }).sorted()
+        var map: [Int: Int] = [:]
+        var next = 0, utf8 = 0, utf16 = 0
+        for scalar in text.unicodeScalars {
+            while next < targets.count, targets[next] <= utf8 { map[targets[next]] = utf16; next += 1 }
+            guard next < targets.count else { break }
+            utf8 += UTF8.width(scalar)
+            utf16 += UTF16.width(scalar)
+        }
+        while next < targets.count { map[targets[next]] = utf16; next += 1 }
+        return ranges.compactMap { range in
+            guard let lower = map[range.lowerBound], let upper = map[range.upperBound] else { return nil }
+            return NSRange(location: lower, length: upper - lower)
+        }
     }
 
     private static func overlaps(_ range: NSRange, _ sorted: [NSRange]) -> Bool {
@@ -126,12 +183,20 @@ struct SourceLines {
     }
 }
 
+/// Heading texts in document order.
+private struct HeadingTextCollector: MarkupWalker {
+    var titles: [String] = []
+
+    mutating func visitHeading(_ heading: Heading) {
+        titles.append(heading.plainText)
+    }
+}
+
 private struct StructureWalker: MarkupWalker {
     let lines: SourceLines
     let lineOffset: Int
     var structure = DocumentStructure()
     var masked: [NSRange] = []
-    private var slugger = HeadingSlugger()
 
     init(lines: SourceLines, lineOffset: Int) {
         self.lines = lines
@@ -154,7 +219,7 @@ private struct StructureWalker: MarkupWalker {
     mutating func visitHeading(_ heading: Heading) {
         let title = heading.plainText
         structure.headings.append(HeadingInfo(
-            level: heading.level, title: title, slug: slugger.slug(for: title),
+            level: heading.level, title: title, slug: "",
             line: line(heading), range: nsRange(heading) ?? NSRange(location: 0, length: 0)
         ))
         descendInto(heading)

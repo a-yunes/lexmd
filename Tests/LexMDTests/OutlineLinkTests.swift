@@ -134,6 +134,66 @@ struct OutlineLinkTests {
         #expect(MarkdownHTML.render(source).contains("[[my target]] [[My Target#Part One|part]]"))
     }
 
+    // MARK: Math and footnotes
+
+    @Test func wikiLinksAndMathCoexist() throws {
+        let folder = try TestFolder()
+        let root = FileScanner.canonicalPath(folder.url.path)
+        try folder.write("Doc.md", "# Doc\n\n## Euler $e^x$\n")
+        let source = """
+        Inline $[[x]]$ stays math. [[Doc|label $a^2$]] renders math. [[Doc#Euler $e^x$]] links.
+        Here [[a$]] and [[b$]] is math.
+
+        Note[^1] and [[^1]] and [[^nope]].
+
+        $$
+        # not a heading [[Doc]]
+        $$
+
+        [^1]: See [[Doc]] and [gone](gone.md).
+
+        # Heading with $x_1_$ and [[Doc]]
+        """
+        try folder.write("Page.md", source)
+        let snapshot = LinkIndexBuilder.build(root: root, previous: LinkIndexSnapshot(), changed: nil)
+        let context = LinkContext(documentPath: root + "/Page.md", source: source, snapshot: snapshot)
+        let html = MarkdownHTML.render(source, links: context)
+
+        // Math wins over wiki brackets inside it or cutting through it.
+        #expect(html.contains(#"<span class="lexmd-math" data-tex="[[x]]">$[[x]]$</span>"#))
+        #expect(html.contains(#"Here [[a<span class="lexmd-math" data-tex="]] and [[b">$]] and [[b$</span>]] is math."#))
+        // A label holding math renders the math inside the link.
+        #expect(html.contains(#"<a class="lexmd-wiki" href="Doc.md">label <span class="lexmd-math" data-tex="a^2">$a^2$</span></a>"#))
+        // A heading with math links to the id the preview gives that heading.
+        #expect(html.contains(#"<a class="lexmd-wiki" href="Doc.md#euler-ex">Doc › Euler <span class="lexmd-math" data-tex="e^x">"#))
+        #expect(MarkdownHTML.render("## Euler $e^x$").contains(#"<h2 id="euler-ex">"#))
+        // Footnote references stay footnotes; `[[^label]]` is never a document link.
+        #expect(html.contains(##"Note<sup class="footnote-ref"><a href="#fn-1""##))
+        #expect(html.contains(##"and [<sup class="footnote-ref"><a href="#fn-1" id="fnref-1-2""##))
+        #expect(html.contains("and [[^nope]]."))
+        // Footnote bodies get wiki links and broken-link marks too.
+        let footnotes = try #require(html.components(separatedBy: "<section class=\"footnotes\">").last)
+        #expect(footnotes.contains(#"See <a class="lexmd-wiki" href="Doc.md">Doc</a> and <a href="gone.md" class="lexmd-broken">gone</a>"#))
+        // No placeholder survives into the page, attributes included.
+        #expect(!html.unicodeScalars.contains("\u{E000}") && !html.unicodeScalars.contains("\u{E001}"))
+
+        // The outline and link checks see the same document as the preview.
+        let structure = DocumentStructure.analyze(source)
+        #expect(structure.headings.map(\.title) == ["Heading with $x_1_$ and [[Doc]]"])
+        let pattern = try NSRegularExpression(pattern: #"<h[1-6] id="([^"]*)""#)
+        let ids = pattern.matches(in: html, range: NSRange(location: 0, length: (html as NSString).length))
+            .map { (html as NSString).substring(with: $0.range(at: 1)) }
+        #expect(ids == structure.headings.map(\.slug))
+        let ns = source as NSString
+        #expect(structure.links.filter { $0.kind == .wiki }.map { ns.substring(with: $0.range) } == [
+            "[[Doc|label $a^2$]]", "[[Doc#Euler $e^x$]]", "[[Doc]]", "[[Doc]]",
+        ])
+        #expect(WikiLink.parse(in: "$[[x]]$ and [[y]] and [[^z]]").map(\.target) == ["y"])
+        let problems = OutlineAnalysis.make(source: source, context: context).problems
+        #expect(problems.map(\.message) == ["File not found: gone.md"])
+        #expect(snapshot.incoming[root + "/Doc.md"]?.count == 4)
+    }
+
     // MARK: Index and backlinks
 
     @Test func backlinksAcrossFiles() async throws {
@@ -203,19 +263,24 @@ struct OutlineLinkTests {
         #expect(updates == 5, "one reset and four index updates")
     }
 
-    @Test func largeProjectsStayBounded() throws {
+    @Test func largeProjectsStayBounded() async throws {
         let folder = try TestFolder()
         let root = FileScanner.canonicalPath(folder.url.path)
-        for i in 0..<1500 {
-            try folder.write("doc\(i).md", "# Doc \(i)\n\nSee [[doc\((i + 1) % 1500)]] and [prev](doc\((i + 1499) % 1500).md).\n")
+        // Heavy work runs off the main actor, which the preview tests share.
+        let (snapshot, seconds) = await runDetached { () -> (LinkIndexSnapshot, Double) in
+            for i in 0..<1500 {
+                try? "# Doc \(i)\n\nSee [[doc\((i + 1) % 1500)]] and [prev](doc\((i + 1499) % 1500).md).\n"
+                    .write(toFile: root + "/doc\(i).md", atomically: false, encoding: .utf8)
+            }
+            let start = Date()
+            let snapshot = LinkIndexBuilder.build(root: root, previous: LinkIndexSnapshot(), changed: nil)
+            return (snapshot, Date().timeIntervalSince(start))
         }
-        let start = Date()
-        let snapshot = LinkIndexBuilder.build(root: root, previous: LinkIndexSnapshot(), changed: nil)
         #expect(snapshot.documents.count == 1500)
         #expect(snapshot.incoming[root + "/doc0.md"]?.count == 2)
-        #expect(Date().timeIntervalSince(start) < 20)
+        #expect(seconds < 20)
         // A rescan with nothing changed reuses every document.
-        let again = LinkIndexBuilder.build(root: root, previous: snapshot, changed: nil)
+        let again = await runDetached { LinkIndexBuilder.build(root: root, previous: snapshot, changed: nil) }
         #expect(again.structureVersion == snapshot.structureVersion)
         #expect(again.documents == snapshot.documents)
     }
@@ -426,7 +491,7 @@ struct OutlineLinkTests {
         window.contentView = preview.webView
 
         let filler = String(repeating: "<p>Text</p>\n", count: 120)
-        let html = "<h1 id=\"top\">Top</h1>\n\(filler)<h2 id=\"part-two\">Part Two</h2>\n\(filler)<p><a id=\"wiki\" class=\"lexmd-wiki\" href=\"Target.md#target\">Target</a></p>"
+        let html = "<h1 id=\"top\">Top</h1>\n\(filler)<h2 id=\"part-two\">Part Two</h2>\n<div class=\"lexmd-diagram\"><h3 id=\"drawn\">Drawn</h3></div>\n\(filler)<p><a id=\"wiki\" class=\"lexmd-wiki\" href=\"Target.md#target\">Target</a></p>"
         preview.render(html: html, baseURL: folder.url, resetScroll: true)
         try await waitUntil { reported.last == "top" }
 
@@ -436,6 +501,11 @@ struct OutlineLinkTests {
             "return document.getElementById('part-two').getBoundingClientRect().top", arguments: [:], in: nil, contentWorld: .page
         ) as? Double
         #expect(abs((top ?? 999) - 20) < 30)
+        // Headings drawn inside a diagram are not document headings.
+        _ = try await preview.webView.callAsyncJavaScript("window.scrollBy(0, 60)", arguments: [:], in: nil, contentWorld: .page)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(reported.last == "part-two")
+        #expect(!reported.contains("drawn"))
 
         // A pending heading is revealed after the next render.
         preview.revealHeading("top", smooth: false, afterRender: true)

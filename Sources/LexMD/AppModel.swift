@@ -86,6 +86,30 @@ final class AppModel {
         }
     }
 
+    // Editor features; see AppModel+Editor.swift.
+    var imageFolder = "assets" {
+        didSet { defaults.set(imageFolder, forKey: Keys.imageFolder) }
+    }
+    var checksSpelling = true {
+        didSet { defaults.set(checksSpelling, forKey: Keys.checksSpelling); applyEditorSettings() }
+    }
+    var checksGrammar = false {
+        didSet { defaults.set(checksGrammar, forKey: Keys.checksGrammar); applyEditorSettings() }
+    }
+    var focusMode = false {
+        didSet { defaults.set(focusMode, forKey: Keys.focusMode); applyEditorSettings() }
+    }
+    var typewriterScrolling = false {
+        didSet { defaults.set(typewriterScrolling, forKey: Keys.typewriterScrolling); applyEditorSettings() }
+    }
+    /// Shows git status badges in the sidebar for projects in git repositories.
+    var showGitStatus = true {
+        didSet {
+            defaults.set(showGitStatus, forKey: Keys.showGitStatus)
+            gitSettingChanged()
+        }
+    }
+
     // In-document find (preview find bar; the editor uses the native find bar)
     var isFindBarVisible = false
     var findQuery = "" {
@@ -164,6 +188,12 @@ final class AppModel {
         static let onboardingComplete = "onboardingComplete"
         static let recentFiles = "recentFiles"
         static let loadsRemoteContent = "loadsRemoteContent"
+        static let imageFolder = "imageFolder"
+        static let checksSpelling = "checksSpelling"
+        static let checksGrammar = "checksGrammar"
+        static let focusMode = "focusMode"
+        static let typewriterScrolling = "typewriterScrolling"
+        static let showGitStatus = "showGitStatus"
         static let outlineVisible = "outlineVisible"
         static let suggestsLinks = "suggestsLinks"
         static let marksBrokenLinks = "marksBrokenLinks"
@@ -176,10 +206,17 @@ final class AppModel {
         recentFolders = defaults.stringArray(forKey: Keys.recentFolders) ?? []
         compactFolders = defaults.object(forKey: Keys.compactFolders) as? Bool ?? true
         loadsRemoteContent = preview.allowsRemoteContent
+        showGitStatus = defaults.object(forKey: Keys.showGitStatus) as? Bool ?? true
         shortcutOverrides = defaults.dictionary(forKey: Keys.shortcuts) as? [String: String] ?? [:]
         recentFiles = defaults.stringArray(forKey: Keys.recentFiles) ?? []
         sidebarPosition = SidebarPosition(rawValue: defaults.string(forKey: Keys.sidebarPosition) ?? "") ?? .left
         appearanceMode = AppearanceMode(rawValue: defaults.string(forKey: Keys.appearance) ?? "") ?? .system
+        imageFolder = defaults.string(forKey: Keys.imageFolder) ?? "assets"
+        checksSpelling = defaults.object(forKey: Keys.checksSpelling) as? Bool ?? true
+        checksGrammar = defaults.bool(forKey: Keys.checksGrammar)
+        focusMode = defaults.bool(forKey: Keys.focusMode)
+        typewriterScrolling = defaults.bool(forKey: Keys.typewriterScrolling)
+        configureEditorFeatures()
         isOutlineVisible = defaults.bool(forKey: Keys.outlineVisible)
         suggestsLinks = defaults.object(forKey: Keys.suggestsLinks) as? Bool ?? true
         marksBrokenLinks = defaults.object(forKey: Keys.marksBrokenLinks) as? Bool ?? true
@@ -368,6 +405,7 @@ final class AppModel {
             guard let self, !Task.isCancelled, self.rootURL == root else { return }
             if nodes != self.tree { self.tree = nodes }
             self.isScanning = false
+            self.gitProjectScanned()
         }
     }
 
@@ -383,6 +421,7 @@ final class AppModel {
     private func handleFileEvents(_ events: [DirectoryWatcher.Event]) {
         guard let root = rootURL?.path else { return }
         linksHandleFileEvents(events, root: root)
+        gitFileEvents(events)
         var structural = false
         var currentChanged = false
         let current = currentFile?.path
@@ -436,7 +475,7 @@ final class AppModel {
     }
 
     /// Shows an alert as a sheet on the key window, or modally when there is none.
-    private func present(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+    func present(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         if let window = NSApp.keyWindow ?? NSApp.mainWindow {
             alert.beginSheetModal(for: window, completionHandler: completion)
         } else {
@@ -521,6 +560,7 @@ final class AppModel {
             try text.write(to: url, atomically: false, encoding: .utf8)
             savedText = text
             if saveError != nil { saveError = nil }
+            gitDocumentSaved()
         } catch {
             saveError = "Couldn’t save: \(error.localizedDescription)"
         }

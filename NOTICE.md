@@ -7,5 +7,6 @@ the same license.
 Sparkle 2.10.0 provides software updates. Its license is in [LICENSE.sparkle](LICENSE.sparkle).
 swift-markdown and swift-cmark render Markdown. Their licenses are in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Both files are bundled with the app.
+Pele 1.13.0 (diagrams) and KaTeX 0.19.1 (math) are MIT licensed; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Apple framework and system symbol rights remain with Apple.

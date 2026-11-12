@@ -57,7 +57,8 @@ struct WikiLink: Hashable, Sendable {
         }
         let rawTarget = body.substring(with: targetPart)
         let target = rawTarget.trimmingCharacters(in: .whitespaces)
-        guard !target.isEmpty || heading != nil else { return nil }
+        // `[[^label]]` is footnote syntax, not a document.
+        guard !target.isEmpty || heading != nil, !target.hasPrefix("^") else { return nil }
         let leading = (rawTarget as NSString).length - ((rawTarget.drop { $0 == " " || $0 == "\t" }) as Substring).utf16.count
         let targetRange = NSRange(location: inner.location + targetPart.location + leading, length: (target as NSString).length)
         return WikiLink(target: target, heading: heading, alias: alias, range: whole, targetRange: targetRange)

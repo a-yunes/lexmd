@@ -11,13 +11,16 @@ rm -rf "$APP" "$ICONS"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$ICONS"
 
 # Compile the Icon Composer document (Liquid Glass Assets.car plus an .icns fallback).
-xcrun actool Resources/AppIcon.icon --compile "$ICONS" --platform macosx \
+# Absolute paths: actool runs in a shared daemon that may resolve relative ones elsewhere.
+xcrun actool "$PWD/Resources/AppIcon.icon" --compile "$PWD/$ICONS" --platform macosx \
   --minimum-deployment-target 26.0 --app-icon AppIcon \
-  --output-partial-info-plist "$ICONS/partial.plist" >/dev/null
+  --output-partial-info-plist "$PWD/$ICONS/partial.plist" >/dev/null
 
 cp .build/release/LexMD "$APP/Contents/MacOS/LexMD"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp "$ICONS/Assets.car" "$ICONS/AppIcon.icns" "$APP/Contents/Resources/"
+# SwiftPM resources (Pele and KaTeX); LexMD looks for them in Contents/Resources.
+ditto .build/release/LexMD_LexMD.bundle "$APP/Contents/Resources/LexMD_LexMD.bundle"
 mkdir -p "$APP/Contents/Frameworks"
 ditto .build/release/Sparkle.framework "$APP/Contents/Frameworks/Sparkle.framework"
 cp LICENSE LICENSE.sparkle THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
