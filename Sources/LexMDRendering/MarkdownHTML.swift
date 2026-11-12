@@ -25,7 +25,7 @@ package enum MarkdownHTML {
     /// Footnote bodies get the same link context, so their wiki links and broken links render too.
     package static func renderBody(_ source: String, footnotes: Bool, links: (any MarkdownLinkRendering)? = nil) -> String {
         let extensions = MarkdownExtensions(source, footnotes: footnotes)
-        let document = Document(parsing: extensions.source)
+        let document = extensions.document ?? Document(parsing: extensions.source)
         var renderer = HTMLRenderer()
         renderer.extensions = extensions
         renderer.links = links
@@ -53,16 +53,29 @@ package enum MarkdownHTML {
         return count
     }
 
+    /// The YAML between an opening `---` line and the next `---` line, and the text after it.
+    /// Lines end at line feeds only, so a CRLF line keeps its carriage return. Only the lines up
+    /// to the closing one are examined.
     private static func splitFrontMatter(_ source: String) -> (String, String)? {
         guard source.hasPrefix("---\n") || source.hasPrefix("---\r\n") else { return nil }
-        let lines = source.components(separatedBy: "\n")
-        guard lines.count > 2 else { return nil }
-        for i in 1..<lines.count where lines[i].trimmingCharacters(in: .whitespacesAndNewlines) == "---" {
-            let front = lines[1..<i].joined(separator: "\n")
-            let rest = lines[(i + 1)...].joined(separator: "\n")
-            return (front, rest)
+        let utf8 = source.utf8
+        let scalars = source.unicodeScalars
+        guard let firstBreak = utf8.firstIndex(of: 0x0A) else { return nil }
+        let frontStart = utf8.index(after: firstBreak)
+        var start = frontStart
+        while true {
+            let end = utf8[start...].firstIndex(of: 0x0A) ?? utf8.endIndex
+            if utf8[start..<end].contains(0x2D),
+               String(scalars[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines) == "---" {
+                // A document of just two lines has no front matter.
+                if start == frontStart, end == utf8.endIndex { return nil }
+                let front = start == frontStart ? "" : String(scalars[frontStart..<utf8.index(before: start)])
+                let rest = end == utf8.endIndex ? "" : String(scalars[utf8.index(after: end)...])
+                return (front, rest)
+            }
+            guard end < utf8.endIndex else { return nil }
+            start = utf8.index(after: end)
         }
-        return nil
     }
 
     package static func escape(_ s: String) -> String {

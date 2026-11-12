@@ -128,13 +128,24 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     /// world (never loaded by the page) when a document first needs them, then kept as user
     /// scripts for later page loads. Calls into the page run in order, so rendering sees them.
     private func loadLibraries(for html: String) {
-        for (index, library) in Self.libraries.enumerated() where !pageLibraries.contains(index) && html.contains(library.0) {
+        for (index, library) in Self.libraries.enumerated() where !pageLibraries.contains(index) && Self.contains(html, library.0) {
             guard let source = library.1 else { continue }
             pageLibraries.insert(index)
             if injectedLibraries.insert(index).inserted {
                 userContent.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Self.world))
             }
             webView.evaluateJavaScript(source, in: nil, in: Self.world, completionHandler: nil)
+        }
+    }
+
+    /// A byte search, much cheaper on a large page than `String.contains`, which compares characters.
+    nonisolated static func contains(_ text: String, _ marker: String) -> Bool {
+        var text = text, marker = marker
+        return text.withUTF8 { haystack in
+            marker.withUTF8 { needle in
+                guard let base = haystack.baseAddress, let pattern = needle.baseAddress else { return needle.isEmpty }
+                return memmem(base, haystack.count, pattern, needle.count) != nil
+            }
         }
     }
 
