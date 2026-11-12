@@ -364,15 +364,20 @@ extension AppModel {
     }
 
     private func confirmDiscard(_ title: String, discard: @escaping () -> Void) {
+        present(Self.discardConfirmation(title)) { response in
+            if response == .alertFirstButtonReturn { discard() }
+        }
+    }
+
+    /// Closing a tab whose text couldn't be saved. Discard Changes closes it; Cancel keeps it.
+    static func discardConfirmation(_ title: String) -> NSAlert {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "“\(title)” has changes that couldn’t be saved."
-        alert.informativeText = "If you close it, those changes are lost."
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Close Anyway")
-        present(alert) { response in
-            if response == .alertSecondButtonReturn { discard() }
-        }
+        alert.messageText = "Changes to “\(title)” couldn’t be saved"
+        alert.informativeText = "If you close the tab now, the changes are lost."
+        alert.addDestructiveButton("Discard Changes")
+        alert.addCancelButton()
+        return alert
     }
 
     /// Clears the editor and preview when the last tab closes.

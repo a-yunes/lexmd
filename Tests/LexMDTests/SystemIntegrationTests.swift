@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import LexMD
 
-/// Opening several paths at once, the Create Note action, and the command line tool installer.
+/// Opening several paths at once, the Create Document action, and the command line tool installer.
 struct OpenPlanTests {
     private let home = "/Users/me"
 

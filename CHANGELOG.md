@@ -31,7 +31,7 @@
   field. It appears only when there are such changes, commits only the files you pick, and never
   contacts a remote. Git features stay hidden outside repositories.
 - Quick Look previews of Markdown files in Finder, a `lexmd` command (LexMD > Install Command
-  Line Tool…), and Shortcuts actions: Open in LexMD, Create Note, and Get Current Document.
+  Line Tool…), and Shortcuts actions: Open in LexMD, Create Document, and Get Current Document.
 
 ## 1.0.0
 

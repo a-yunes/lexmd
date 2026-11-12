@@ -245,7 +245,7 @@ struct GitKindLabel: View {
             .font(.system(size: 10, weight: .semibold, design: .monospaced))
             .foregroundStyle(kind.color)
             .frame(minWidth: 12)
-            .help(kind.label)
+            .help(kind.help)
             .accessibilityLabel(kind.label)
     }
 }
@@ -405,8 +405,11 @@ struct CommitSheet: View {
     }
 
     private var countLabel: String {
-        let total = session.changes.count
-        return total == 0 ? "No changed files" : "\(session.selectedChanges.count) of \(total) selected"
+        Self.countLabel(selected: session.selectedChanges.count, total: session.changes.count)
+    }
+
+    static func countLabel(selected: Int, total: Int) -> String {
+        total == 0 ? "No changed files" : "\(selected) of \(total) selected"
     }
 
     // MARK: Diff
@@ -476,9 +479,13 @@ struct CommitSheet: View {
     }
 
     private var commitTitle: String {
-        let count = session.selectedChanges.count
-        if session.isCommitting { return "Committing…" }
-        return count == 0 ? "Commit" : "Commit \(count) \(count == 1 ? "File" : "Files")"
+        Self.commitTitle(count: session.selectedChanges.count, isCommitting: session.isCommitting)
+    }
+
+    static func commitTitle(count: Int, isCommitting: Bool) -> String {
+        if isCommitting { return "Committing…" }
+        guard count > 0 else { return "Commit" }
+        return String(AttributedString(localized: "Commit ^[\(count) File](inflect: true)").characters)
     }
 
     @ViewBuilder
