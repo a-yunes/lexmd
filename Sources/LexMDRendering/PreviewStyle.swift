@@ -5,7 +5,7 @@ package enum PreviewStyle {
 :root {
   --text: #1d1d1f;
   --secondary: #6e6e73;
-  --tertiary: #8e8e93;
+  --tertiary: #707075;
   --accent: #0066cc;
   --hair: rgba(0, 0, 0, 0.09);
   --hair-strong: rgba(0, 0, 0, 0.16);
@@ -20,7 +20,7 @@ package enum PreviewStyle {
   :root {
     --text: #f5f5f7;
     --secondary: #a1a1a6;
-    --tertiary: #7c7c82;
+    --tertiary: #939398;
     --accent: #3d9bff;
     --hair: rgba(255, 255, 255, 0.10);
     --hair-strong: rgba(255, 255, 255, 0.18);
@@ -166,8 +166,8 @@ code, pre, kbd, samp { font-family: "SF Mono", ui-monospace, Menlo, monospace; }
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
 }
-.codeblock:hover .copy { opacity: 1; }
-.codeblock:hover .lang { opacity: 0; }
+.codeblock:hover .copy, .codeblock:focus-within .copy, .codeblock .copy:focus-visible { opacity: 1; }
+.codeblock:hover .lang, .codeblock:focus-within .lang { opacity: 0; }
 .codeblock .copy:hover { color: var(--text); }
 .codeblock .copy.done { color: var(--tip); }
 .table-wrap { overflow-x: auto; border: 1px solid var(--hair); border-radius: 12px; }
@@ -247,10 +247,42 @@ mark.lexmd-hit.current {
 /* Links: wiki links to missing documents, and local links whose file or heading is gone. */
 .lexmd-missing { color: var(--tertiary); border-bottom: 1px dashed currentColor; cursor: default; }
 a.lexmd-broken { color: var(--caution); text-decoration: underline wavy color-mix(in srgb, var(--caution) 60%, transparent); text-underline-offset: 0.2em; text-decoration-thickness: 1px; }
+/* Differentiate Without Color (a class LexMD sets on the root): links and the current find match
+   carry an underline, not only a color. */
+html.lexmd-differentiate a:not(.lexmd-broken) { text-decoration: underline; text-underline-offset: 0.18em; text-decoration-thickness: 1px; }
+html.lexmd-differentiate mark.lexmd-hit.current { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 0.15em; }
+/* Increase Contrast: underlined links, stronger borders and fills, and darker secondary text. */
+@media (prefers-contrast: more) {
+  :root {
+    --secondary: #48484d;
+    --tertiary: #545459;
+    --hair: rgba(0, 0, 0, 0.3);
+    --hair-strong: rgba(0, 0, 0, 0.5);
+    --fill: rgba(0, 0, 0, 0.055);
+    --fill-strong: rgba(0, 0, 0, 0.1);
+    --com: #4f5b66;
+  }
+  a:not(.lexmd-broken) { text-decoration: underline; text-underline-offset: 0.18em; text-decoration-thickness: 1px; }
+  .codeblock, .table-wrap, details { border-color: var(--hair-strong); }
+  :not(pre) > code { box-shadow: inset 0 0 0 1px var(--hair); }
+  .callout { border-color: color-mix(in srgb, var(--c) 60%, transparent); }
+  blockquote { border-left-color: var(--secondary); }
+}
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root {
+    --secondary: #c7c7cc;
+    --tertiary: #b5b5ba;
+    --hair: rgba(255, 255, 255, 0.32);
+    --hair-strong: rgba(255, 255, 255, 0.52);
+    --fill: rgba(255, 255, 255, 0.07);
+    --fill-strong: rgba(255, 255, 255, 0.13);
+    --com: #a9b4bf;
+  }
+}
 /* Printing and PDF export: light colors, full width, and page breaks that keep blocks readable. */
 @media print {
   :root {
-    --text: #1d1d1f; --secondary: #6e6e73; --tertiary: #8e8e93; --accent: #0066cc;
+    --text: #1d1d1f; --secondary: #6e6e73; --tertiary: #707075; --accent: #0066cc;
     --hair: rgba(0, 0, 0, 0.12); --hair-strong: rgba(0, 0, 0, 0.2);
     --fill: rgba(0, 0, 0, 0.035); --fill-strong: rgba(0, 0, 0, 0.06);
     --kw: #ad3da4; --str: #c41a16; --com: #707f8c; --num: #1c00cf;

@@ -325,6 +325,7 @@ final class AppModel {
         }
         preview.onOpenURL = { [weak self] url in self?.openLink(url) }
         preview.onHighlightCount = { [weak self] count in self?.highlightCountChanged(count) }
+        preview.onPinch = { [weak self] steps in self?.zoom(by: steps) }
         applyFontScale()
         setUpLinks()
 
@@ -907,6 +908,7 @@ final class AppModel {
             guard let self, !Task.isCancelled else { return }
             let reset = self.pendingScrollReset
             self.pendingScrollReset = false
+            self.preview.setDocumentTitle(self.currentFile == nil ? "" : self.title)
             self.preview.render(html: html, baseURL: base, resetScroll: reset)
             if self.wordCount != words { self.wordCount = words }
         }
@@ -974,7 +976,7 @@ final class AppModel {
     }
 
     func toggleSidebar() {
-        withAnimation(.snappy(duration: 0.25)) {
+        withMotion(.snappy(duration: 0.25)) {
             if sidebarPosition == .right {
                 isInspectorPresented.toggle()
             } else {

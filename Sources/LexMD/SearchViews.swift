@@ -102,6 +102,7 @@ struct OptionToggle: View {
         .help(help)
         .accessibilityLabel(help)
         .accessibilityValue(isOn ? "On" : "Off")
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 
@@ -174,11 +175,11 @@ struct FindBar: View {
                 OptionToggle(title: ".*", help: "Regular Expression", isOn: $model.findUsesRegex)
             }
             HStack(spacing: 2) {
-                BarIconButton(symbol: "chevron.up", help: model.helpText("Previous Match", .findPrevious)) { model.findNext(false) }
-                BarIconButton(symbol: "chevron.down", help: model.helpText("Next Match", .findNext)) { model.findNext(true) }
+                BarIconButton(symbol: "chevron.up", label: "Previous Match", help: model.helpText("Previous Match", .findPrevious)) { model.findNext(false) }
+                BarIconButton(symbol: "chevron.down", label: "Next Match", help: model.helpText("Next Match", .findNext)) { model.findNext(true) }
             }
             .disabled(model.findCount == 0)
-            BarIconButton(symbol: "xmark", help: "Close (esc)") { model.closeFindBar() }
+            BarIconButton(symbol: "xmark", label: "Close Find Bar", help: "Close (esc)") { model.closeFindBar() }
         }
         .frame(height: 44)
     }
@@ -228,6 +229,8 @@ struct FindBar: View {
         .padding(.trailing, 8)
         // System glass draws its own edge and shadow.
         .glassEffect(.regular, in: shape)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(model.isReplaceVisible ? "Find and Replace" : "Find")
     }
 
     private var countLabel: String {
@@ -240,6 +243,8 @@ struct FindBar: View {
 /// Compact icon button with a soft hover background.
 struct BarIconButton: View {
     let symbol: String
+    /// The name VoiceOver reads; `help` may add the shortcut.
+    let label: String
     let help: String
     let action: () -> Void
     @State private var isHovering = false
@@ -260,7 +265,7 @@ struct BarIconButton: View {
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
         .help(help)
-        .accessibilityLabel(help)
+        .accessibilityLabel(label)
     }
 }
 
@@ -371,9 +376,9 @@ struct QuickSearchPanel: View {
                 .font(.system(size: 34, weight: .light))
                 .foregroundStyle(.tertiary)
                 .padding(.bottom, 4)
-            Text(title).font(.system(size: 15, weight: .semibold))
+            Text(title).font(.title3.weight(.semibold))
             Text(message)
-                .font(.system(size: 12))
+                .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
@@ -399,7 +404,7 @@ struct QuickSearchPanel: View {
         }()
         return HStack(spacing: 14) {
             Text(summary)
-                .font(.system(size: 11))
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
             Spacer()
@@ -420,11 +425,11 @@ private struct KeyHint: View {
     var body: some View {
         HStack(spacing: 5) {
             Text(keys)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .font(.system(.caption, design: .rounded, weight: .semibold))
                 .padding(.horizontal, 5)
                 .frame(minWidth: 18, minHeight: 16)
                 .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.primary.opacity(0.08)))
-            Text(label).font(.system(size: 11))
+            Text(label).font(.subheadline)
         }
         .foregroundStyle(.secondary)
     }
@@ -485,7 +490,7 @@ private struct SectionTitle: View {
 
     var body: some View {
         Text(title)
-            .font(.system(size: 11, weight: .semibold))
+            .font(.subheadline.weight(.semibold))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)
             .padding(.top, 8)
@@ -500,15 +505,15 @@ private struct QuickFileRow: View {
     var body: some View {
         HStack(spacing: 9) {
             Image(systemName: "doc.text.fill")
-                .font(.system(size: 14))
+                .font(.body)
                 .foregroundStyle(isSelected ? Color.white : Color.accentColor)
                 .frame(width: 18)
             Text(name)
-                .font(.system(size: 13))
+                .font(.body)
                 .lineLimit(1)
             if !file.folder.isEmpty {
                 Text(file.folder)
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                     .foregroundStyle(isSelected ? Color.white.opacity(0.75) : Color.secondary)
                     .lineLimit(1)
                     .truncationMode(.head)
@@ -527,7 +532,7 @@ private struct QuickFileRow: View {
         let matched = Set(file.matched)
         for (i, ch) in file.name.enumerated() {
             var piece = AttributedString(String(ch))
-            if matched.contains(i) { piece.font = .system(size: 13, weight: .bold) }
+            if matched.contains(i) { piece.font = .body.bold() }
             result += piece
         }
         return result
@@ -541,22 +546,22 @@ private struct QuickFileHeader: View {
     var body: some View {
         HStack(spacing: 7) {
             Image(systemName: "doc.text")
-                .font(.system(size: 12))
+                .font(.callout)
                 .foregroundStyle(.secondary)
                 .frame(width: 18)
             Text((hit.name as NSString).deletingPathExtension)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.callout.weight(.semibold))
                 .lineLimit(1)
             if !hit.folder.isEmpty {
                 Text(hit.folder)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.head)
             }
             Spacer(minLength: 8)
             Text("\(count)")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 6)
@@ -577,14 +582,14 @@ private struct QuickHitRow: View {
         HStack(spacing: 10) {
             Text(highlighted(
                 hit.snippet, hit.snippetMatch,
-                matchFont: .system(size: 13, weight: .semibold),
+                matchFont: .body.weight(.semibold),
                 matchBackground: isSelected ? nil : Color.yellow.opacity(0.35)
             ))
-            .font(.system(size: 13))
+            .font(.body)
             .lineLimit(1)
             Spacer(minLength: 8)
             Text("\(hit.line)")
-                .font(.system(size: 11))
+                .font(.subheadline)
                 .monospacedDigit()
                 .foregroundStyle(isSelected ? Color.white.opacity(0.8) : Color.secondary)
         }
@@ -613,19 +618,19 @@ private struct QuickPreviewPane: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 7) {
                 Image(systemName: "doc.text")
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Text(preview.name).font(.system(size: 12, weight: .semibold))
+                Text(preview.name).font(.callout.weight(.semibold))
                 if !preview.folder.isEmpty {
                     Text(preview.folder)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.head)
                 }
                 Spacer()
                 Text(preview.detail)
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 16)
@@ -635,15 +640,15 @@ private struct QuickPreviewPane: View {
                 ForEach(preview.lines) { line in
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text("\(line.id)")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.tertiary)
+                            .font(.system(.subheadline, design: .monospaced))
+                            .foregroundStyle(.secondary)
                             .frame(width: 36, alignment: .trailing)
                         Text(highlighted(
                             line.text, line.match,
-                            matchFont: .system(size: 12, weight: .bold, design: .monospaced),
+                            matchFont: .system(.callout, design: .monospaced, weight: .bold),
                             matchBackground: Color.yellow.opacity(0.45)
                         ))
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.system(.callout, design: .monospaced))
                         .lineLimit(1)
                         Spacer(minLength: 0)
                     }

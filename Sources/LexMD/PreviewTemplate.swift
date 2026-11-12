@@ -6,6 +6,7 @@ import LexMDRendering
 enum PreviewTemplate {
     static func html(allowsRemoteContent: Bool) -> String {
         page.replacingOccurrences(of: "REMOTE", with: allowsRemoteContent ? " https:" : "")
+            .replacingOccurrences(of: "<html>", with: "<html lang=\"\(MarkdownHTML.languageTag())\">")
             .replacingOccurrences(of: "</head>", with: renderingHead + "</head>")
     }
 
@@ -16,6 +17,7 @@ enum PreviewTemplate {
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src lexmd-doc: data:REMOTE; media-src lexmd-doc: data:REMOTE; font-src lexmd-doc: lexmd-vendor: data:; base-uri lexmd-doc:; form-action 'none'">
 <meta name="color-scheme" content="light dark">
+<title></title>
 <base id="lexmd-base" href="">
 <style>
 """# + "\n" + PreviewStyle.page + "\n" + #"""
@@ -32,6 +34,9 @@ enum PreviewTemplate {
   var content = document.getElementById('content');
   var base = document.getElementById('lexmd-base');
   var currentBase = '';
+  // Reduce Motion turns smooth scrolling into an immediate jump.
+  var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  function scrollBehavior(smooth) { return smooth && !reducedMotion.matches ? 'smooth' : 'auto'; }
 
   function sourceOf(node) {
     return node.nodeType === 1 ? node.outerHTML : node.textContent;
@@ -183,7 +188,7 @@ enum PreviewTemplate {
     if (href.charAt(0) === '#') {
       e.preventDefault();
       var target = document.getElementById(decodeURIComponent(href.slice(1)));
-      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (target) target.scrollIntoView({ behavior: scrollBehavior(true), block: 'start' });
     }
   });
 
@@ -232,7 +237,7 @@ enum PreviewTemplate {
     var max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
     var y = Math.round(Math.min(max, Math.max(0, window.scrollY + target.getBoundingClientRect().top - margin)));
     spyPin = { id: id, y: y, until: Date.now() + 1500, arrived: false };
-    window.scrollTo({ top: y, behavior: smooth ? 'smooth' : 'auto' });
+    window.scrollTo({ top: y, behavior: scrollBehavior(smooth) });
     reportHeading(id);
     return true;
   };

@@ -85,7 +85,7 @@ private struct SidebarDragAndDrop: ViewModifier {
                 springTask = Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(700))
                     guard !Task.isCancelled, isTargeted else { return }
-                    withAnimation(.snappy(duration: 0.22)) { model.setExpanded(node, true) }
+                    withMotion(.snappy(duration: 0.22)) { model.setExpanded(node, true) }
                 }
             }
             .background {

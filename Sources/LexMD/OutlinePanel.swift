@@ -3,6 +3,7 @@ import SwiftUI
 /// The document's headings, the documents that link to it, and its broken links.
 struct OutlinePanel: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
     @State private var showsHeadings = true
     @State private var showsBacklinks = true
     @State private var showsProblems = true
@@ -44,7 +45,7 @@ struct OutlinePanel: View {
                     .listStyle(.sidebar)
                     .onChange(of: outline.currentHeading) { _, id in
                         guard let id else { return }
-                        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("heading-\(id)") }
+                        withMotion(.easeOut(duration: 0.2)) { proxy.scrollTo("heading-\(id)") }
                     }
                 }
             }
@@ -59,7 +60,7 @@ struct OutlinePanel: View {
             let current = outline.currentHeading == heading.id
             Button { model.revealHeading(heading) } label: {
                 Text(heading.title.isEmpty ? "Untitled" : heading.title)
-                    .font(.system(size: 12.5, weight: heading.level == minLevel ? .semibold : .regular))
+                    .font(.body.weight(heading.level == minLevel ? .semibold : .regular))
                     .foregroundStyle(current ? Color.accentColor : (heading.level - minLevel >= 2 ? Color.secondary : Color.primary))
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -71,6 +72,16 @@ struct OutlinePanel: View {
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .fill(current ? Color.accentColor.opacity(0.14) : Color.clear)
                     )
+                    // With Differentiate Without Color, a bar marks the current heading too.
+                    .overlay(alignment: .leading) {
+                        if current, differentiateWithoutColor {
+                            Capsule()
+                                .fill(Color.primary)
+                                .frame(width: 3)
+                                .padding(.vertical, 3)
+                                .accessibilityHidden(true)
+                        }
+                    }
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -93,12 +104,12 @@ struct OutlinePanel: View {
                         HStack(spacing: 5) {
                             Image(systemName: "doc.text").foregroundStyle(.secondary)
                             Text(link.name)
-                                .font(.system(size: 12.5, weight: .medium))
+                                .font(.body.weight(.medium))
                                 .lineLimit(1)
                             Spacer(minLength: 0)
                         }
                         Text(link.context)
-                            .font(.system(size: 11))
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
                     }
@@ -111,8 +122,8 @@ struct OutlinePanel: View {
             }
             if outline.backlinkCount > outline.backlinks.count {
                 Text("\(outline.backlinkCount - outline.backlinks.count) more not shown")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -124,13 +135,14 @@ struct OutlinePanel: View {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
-                        .font(.system(size: 11))
+                        .font(.subheadline)
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(problem.message)
-                            .font(.system(size: 12))
+                            .font(.callout)
                             .lineLimit(2)
                         Text("Line \(problem.line) · \(problem.target)")
-                            .font(.system(size: 11))
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -177,7 +189,7 @@ private struct SectionHeader: View {
             if let count, count > 0 {
                 Text("\(count)")
                     .monospacedDigit()
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
         }
         .accessibilityElement(children: .combine)
@@ -214,6 +226,7 @@ enum OutlineLayout {
 private struct OutlinePlacement: ViewModifier {
     let edge: HorizontalEdge
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         if edge == .trailing {
@@ -229,7 +242,7 @@ private struct OutlinePlacement: ViewModifier {
             HStack(spacing: 0) {
                 if model.showsOutlinePanel {
                     LeadingOutlinePanel()
-                        .transition(.move(edge: .leading).combined(with: .opacity))
+                        .transition(.motion(.move(edge: .leading).combined(with: .opacity), reduced: reduceMotion))
                 }
                 content
             }

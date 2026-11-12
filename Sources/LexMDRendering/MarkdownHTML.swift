@@ -78,6 +78,15 @@ package enum MarkdownHTML {
         }
     }
 
+    /// The reader's preferred language as a BCP 47 tag for `<html lang>`, so VoiceOver reads the
+    /// page in the right voice. Falls back to "en".
+    package static func languageTag(preferred: [String] = Locale.preferredLanguages) -> String {
+        let tag = preferred.first ?? ""
+        let valid = !tag.isEmpty && tag.utf8.count <= 35
+            && tag.unicodeScalars.allSatisfy { $0.isASCII && ($0.properties.isAlphabetic || ("0"..."9").contains($0) || $0 == "-") }
+        return valid ? tag : "en"
+    }
+
     package static func escape(_ s: String) -> String {
         var out = ""
         out.reserveCapacity(s.utf8.count)

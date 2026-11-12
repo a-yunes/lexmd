@@ -59,7 +59,7 @@ package struct QuickLookPage {
         let title = MarkdownHTML.escape(fileURL.lastPathComponent)
         let html = """
         <!doctype html>
-        <html>
+        <html lang="\(MarkdownHTML.languageTag())">
         <head>
         <meta charset="utf-8">
         <meta http-equiv="Content-Security-Policy" content="\(contentSecurityPolicy)">
