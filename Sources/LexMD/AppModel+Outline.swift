@@ -111,6 +111,10 @@ final class OutlineModel {
     /// The heading id the preview last reported.
     @ObservationIgnored var previewSlug: String?
     @ObservationIgnored private var headingCache: (source: String, headings: [HeadingInfo])?
+    /// Headings of the text in the editor, with the editor's text version they were parsed from.
+    @ObservationIgnored var editorHeadings: (path: String, version: Int, headings: [IndexedHeading])?
+    /// The running parse of the editor's text for `editorHeadings`; at most one runs at a time.
+    @ObservationIgnored var editorHeadingTask: Task<Void, Never>?
     /// Link completion candidates for the project's files, rebuilt only when the files change.
     @ObservationIgnored private var candidateCache: (key: CandidateKey, candidates: [EditorCompletion.Candidate])?
 
@@ -426,6 +430,35 @@ extension AppModel {
         }
     }
 
+    /// Headings of the document being edited, without parsing it on the main thread: the latest
+    /// parse, or the indexed headings of the saved file before the first one. When the text has
+    /// changed since, it is parsed again in the background, one pass at a time, and the
+    /// suggestions refresh when the pass ends.
+    func currentHeadingsForCompletion(snapshot: LinkIndexSnapshot) -> [IndexedHeading] {
+        guard let path = currentFile?.path else { return [] }
+        let cached = outline.editorHeadings.flatMap { $0.path == path ? $0 : nil }
+        if cached?.version != editor.textVersion { parseEditorHeadings() }
+        return cached?.headings ?? snapshot.documents[path]?.headings ?? []
+    }
+
+    private func parseEditorHeadings() {
+        guard outline.editorHeadingTask == nil, let path = currentFile?.path else { return }
+        let version = editor.textVersion
+        let source = editor.textView.string
+        outline.editorHeadingTask = Task { [weak self] in
+            let headings = await runDetached {
+                DocumentStructure.analyze(source).headings.map {
+                    IndexedHeading(slug: $0.slug, title: $0.title, level: $0.level, line: $0.line)
+                }
+            }
+            guard let self else { return }
+            self.outline.editorHeadingTask = nil
+            if self.currentFile?.path == path { self.outline.editorHeadings = (path, version, headings) }
+            // Showing suggestions ask again, which starts the next pass if the text moved on.
+            self.outline.completion?.refresh()
+        }
+    }
+
     private func fileCandidate(_ path: String, kind: CompletionItem.Kind, folder: String, root: String, group: Int) -> EditorCompletion.Candidate {
         let relative = LinkPaths.relative(path, from: folder)
         let fromRoot = LinkPaths.relative(path, from: root)
@@ -440,7 +473,7 @@ extension AppModel {
         guard let path else { return [] }
         let headings: [(title: String, slug: String, level: Int)]
         if path == currentFile?.path {
-            headings = outline.headings(of: text).map { ($0.title, $0.slug, $0.level) }
+            headings = currentHeadingsForCompletion(snapshot: snapshot).map { ($0.title, $0.slug, $0.level) }
         } else {
             headings = snapshot.documents[path]?.headings.map { ($0.title, $0.slug, $0.level) } ?? []
         }

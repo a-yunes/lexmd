@@ -407,6 +407,42 @@ struct EditorFeatureTests {
         #expect(harness.text == "Rewritten elsewhere\n")
     }
 
+    @Test func textUndoIsSeparateFromTheWindowsFileUndo() throws {
+        let harness = Harness("One\n", selection: NSRange(location: 3, length: 0))
+        let editor = harness.editor
+        let window = harness.window
+        #expect(editor.textView.undoManager === editor.undoManager)
+        let windowUndo = try #require(window.undoManager)
+        #expect(windowUndo !== editor.undoManager)
+
+        // A file operation registers on the window, as AppModel.fileUndoManager does.
+        final class Flag { var undone = false }
+        let flag = Flag()
+        windowUndo.registerUndo(withTarget: flag) { $0.undone = true }
+
+        editor.textView.insertText(" two", replacementRange: harness.selection)
+        #expect(editor.undoManager.canUndo)
+
+        // Undo from the focused editor reverts text, not the file operation.
+        #expect(window.firstResponder === editor.textView)
+        #expect(editor.textView.tryToPerform(Selector(("undo:")), with: nil))
+        #expect(harness.text == "One\n")
+        #expect(!flag.undone)
+
+        // Loading or reloading a document clears only the text history.
+        editor.textView.insertText("!", replacementRange: NSRange(location: 0, length: 0))
+        editor.load("Other\n")
+        editor.replaceText("Reloaded\n")
+        #expect(!editor.undoManager.canUndo)
+        #expect(windowUndo.canUndo)
+
+        // With focus elsewhere, Undo reaches the file operation.
+        window.makeFirstResponder(nil)
+        #expect(window.tryToPerform(Selector(("undo:")), with: nil))
+        #expect(flag.undone)
+        #expect(harness.text == "Reloaded\n")
+    }
+
     // MARK: Input methods
 
     @Test func pasteWhileComposingIsLeftToTheTextView() {
