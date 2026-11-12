@@ -22,7 +22,7 @@ enum VendorAssets {
 
     /// Same places SwiftPM's generated accessor looks, without its crash when nothing is found:
     /// the app's Resources folder, the bundle holding this code (tests), and next to the executable.
-    private static func bundleCandidates() -> [URL?] {
+    static func bundleCandidates() -> [URL?] {
         [
             Bundle.main.resourceURL,
             Bundle(for: BundleMarker.self).resourceURL,

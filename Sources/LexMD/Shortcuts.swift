@@ -113,8 +113,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     // Declared in menu order, which is the order Settings lists them in. The raw values are the
     // keys of saved shortcuts, so a case is never renamed.
     case installCommandLineTool
-    case newDocument, newFolder, open, quickOpen, newTab, closeTab, reopenClosedTab, save
-    case revealInFinder, renameItem, duplicateItem, moveToTrash, exportPDF, exportHTML, printDocument
+    case newDocument, newFolder, newTab, open, quickOpen, closeWindow, closeTab, reopenClosedTab, save
+    case revealInFinder, renameItem, duplicateItem, moveTo, moveToTrash, exportPDF, exportHTML, printDocument
     case copyRichText, find, findAndReplace, findNext, findPrevious, useSelectionForFind, jumpToSelection, findInFiles
     case bold, italic, strikethrough, inlineCode, link, formatTable
     case toggleSidebar, toggleOutline, previewOnly, split, editorOnly, focusMode, typewriterScrolling
@@ -137,8 +137,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     var category: Category {
         switch self {
         case .installCommandLineTool: .app
-        case .newDocument, .newFolder, .open, .quickOpen, .newTab, .closeTab, .reopenClosedTab, .save,
-             .revealInFinder, .renameItem, .duplicateItem, .moveToTrash, .exportPDF, .exportHTML, .printDocument: .file
+        case .newDocument, .newFolder, .newTab, .open, .quickOpen, .closeWindow, .closeTab, .reopenClosedTab, .save,
+             .revealInFinder, .renameItem, .duplicateItem, .moveTo, .moveToTrash, .exportPDF, .exportHTML, .printDocument: .file
         case .copyRichText, .find, .findAndReplace, .findNext, .findPrevious, .useSelectionForFind, .jumpToSelection,
              .findInFiles: .edit
         case .bold, .italic, .strikethrough, .inlineCode, .link, .formatTable: .format
@@ -157,8 +157,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .quickOpen: "Open Quickly…"
         case .newDocument: "New Document"
         case .save: "Save"
-        case .revealInFinder: "Reveal in Finder"
-        case .toggleSidebar: "Show/Hide Sidebar"
+        case .revealInFinder: "Show in Finder"
+        case .toggleSidebar: "Show or Hide Sidebar"
         case .previewOnly: "Preview Only"
         case .split: "Preview and Editor"
         case .editorOnly: "Editor Only"
@@ -184,9 +184,11 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .newFolder: "New Folder"
         case .renameItem: "Rename"
         case .duplicateItem: "Duplicate"
+        case .moveTo: "Move To…"
         case .moveToTrash: "Move to Trash"
         case .closeTab: "Close Tab"
-        case .newTab: "New Tab"
+        case .closeWindow: "Close Window"
+        case .newTab: "New Tab…"
         case .reopenClosedTab: "Reopen Closed Tab"
         case .showNextTab: "Show Next Tab"
         case .showPreviousTab: "Show Previous Tab"
@@ -198,7 +200,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .exportHTML: "Export as HTML…"
         case .printDocument: "Print…"
         case .copyRichText: "Copy as Rich Text"
-        case .toggleOutline: "Show/Hide Outline"
+        case .toggleOutline: "Show or Hide Outline"
         case .installCommandLineTool: "Install Command Line Tool…"
         case .renameInSidebar: "Rename in Sidebar"
         case .trashInSidebar: "Move to Trash in Sidebar"
@@ -243,8 +245,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .newFolder: "shift+cmd+n"
         case .renameItem: ""
         case .duplicateItem: ""
+        case .moveTo: ""
         case .moveToTrash: ""
         case .closeTab: "cmd+w"
+        case .closeWindow: "shift+cmd+w"
         case .newTab: "cmd+t"
         case .reopenClosedTab: "shift+cmd+t"
         case .showNextTab: "ctrl+tab"

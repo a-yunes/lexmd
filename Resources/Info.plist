@@ -20,6 +20,8 @@
 	<string>AppIcon</string>
 	<key>CFBundleIconName</key>
 	<string>AppIcon</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026 Aleksei Iunes</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>LSMinimumSystemVersion</key>
@@ -71,6 +73,7 @@
 				<string>mdwn</string>
 				<string>mdtxt</string>
 				<string>mdtext</string>
+				<string>mdx</string>
 			</array>
 		</dict>
 		<dict>
@@ -129,6 +132,9 @@
 					<string>mkd</string>
 					<string>mkdn</string>
 					<string>mdwn</string>
+					<string>mdtxt</string>
+					<string>mdtext</string>
+					<string>mdx</string>
 				</array>
 				<key>public.mime-type</key>
 				<array>
