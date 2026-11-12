@@ -323,16 +323,21 @@ final class TextCache: @unchecked Sendable {
         if let modified, let entry = cache.object(forKey: key), entry.modified == modified {
             return entry.text
         }
-        guard let text = Self.decode(path) else { return nil }
+        guard let text = DocumentText.read(URL(fileURLWithPath: path)) else { return nil }
         if let modified {
             cache.setObject(Entry(modified: modified, text: text), forKey: key, cost: text.utf8.count)
         }
         return text
     }
+}
 
-    private static func decode(_ path: String) -> String? {
-        let url = URL(fileURLWithPath: path)
+/// Reads a document as LexMD opens it: UTF-8, then the encoding the file declares or
+/// Foundation detects (UTF-16 with a byte order mark, for example), then Latin-1.
+enum DocumentText {
+    static func read(_ url: URL) -> String? {
         if let s = try? String(contentsOf: url, encoding: .utf8) { return s }
+        var encoding = String.Encoding.utf8
+        if let s = try? String(contentsOf: url, usedEncoding: &encoding) { return s }
         return try? String(contentsOf: url, encoding: .isoLatin1)
     }
 }

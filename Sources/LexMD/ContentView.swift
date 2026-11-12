@@ -9,9 +9,7 @@ struct ContentView: View {
         Group {
             if model.sidebarPosition == .right {
                 // macOS split views keep the sidebar leading, so a trailing tree uses the inspector column.
-                DetailView()
-                    .outlinePanel(.leading)
-                    .toolbar { detailToolbar(trailingSidebar: true) }
+                DetailColumn(trailingSidebar: true)
                     .inspector(isPresented: $model.isInspectorPresented) {
                         SidebarView(inInspector: true)
                             .inspectorColumnWidth(min: 210, ideal: 270, max: 440)
@@ -21,13 +19,10 @@ struct ContentView: View {
                     SidebarView(inInspector: false)
                         .navigationSplitViewColumnWidth(min: 210, ideal: 270, max: 440)
                 } detail: {
-                    DetailView()
-                        .outlinePanel(.trailing)
-                        .toolbar { detailToolbar(trailingSidebar: false) }
+                    DetailColumn(trailingSidebar: false)
                 }
             }
         }
-        .navigationTitle(model.title)
         .toolbar(removing: .title)
         .overlay {
             if model.isQuickSearchVisible {
@@ -58,7 +53,19 @@ struct ContentView: View {
     }
 }
 
-extension ContentView {
+/// The document column with its toolbar and the window title. Everything that changes with the
+/// open document is read here, so switching documents does not re-evaluate the whole window.
+private struct DetailColumn: View {
+    let trailingSidebar: Bool
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        DetailView()
+            .outlinePanel(trailingSidebar ? .leading : .trailing)
+            .toolbar { detailToolbar(trailingSidebar: trailingSidebar) }
+            .navigationTitle(model.title)
+    }
+
     @ToolbarContentBuilder
     func detailToolbar(trailingSidebar: Bool) -> some ToolbarContent {
         ToolbarItem(placement: .navigation) {
@@ -157,15 +164,19 @@ struct SidebarView: View {
                 .listStyle(.sidebar)
                 .contextMenu { SidebarBackgroundMenu() }
                 .dropDestination(for: URL.self) { urls, _ in model.moveItems(urls, into: root) }
-                .onKeyPress(.return) {
-                    guard model.sidebarFiles.renamingPath == nil, let path = model.selectedPath else { return .ignored }
-                    model.beginRename(URL(fileURLWithPath: path))
-                    return .handled
-                }
-                .onKeyPress(.delete, phases: .down) { press in
-                    guard press.modifiers == .command, let path = model.selectedPath else { return .ignored }
-                    model.confirmMoveToTrash(URL(fileURLWithPath: path))
-                    return .handled
+                .onKeyPress(phases: [.down, .repeat]) { press in
+                    guard let path = model.selectedPath else { return .ignored }
+                    if model.shortcut(for: .renameInSidebar)?.matches(press.key, modifiers: press.modifiers) == true,
+                       model.sidebarFiles.renamingPath == nil {
+                        model.beginRename(URL(fileURLWithPath: path))
+                        return .handled
+                    }
+                    if press.phase == .down,
+                       model.shortcut(for: .trashInSidebar)?.matches(press.key, modifiers: press.modifiers) == true {
+                        model.confirmMoveToTrash(URL(fileURLWithPath: path))
+                        return .handled
+                    }
+                    return .ignored
                 }
                 .overlay {
                     if rows.isEmpty, !model.isScanning {

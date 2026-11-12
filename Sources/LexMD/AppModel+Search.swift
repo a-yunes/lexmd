@@ -211,7 +211,31 @@ extension AppModel {
         quickOptions.regex ? quickQuery : quickQuery.trimmingCharacters(in: .whitespaces)
     }
 
-    func scheduleQuickSearch(debounce: Bool = true) {
+    /// The project's files changed while the panel is open: search again. Unless newer results
+    /// are already on their way, the selected result stays selected.
+    func refreshQuickSearchForTree() {
+        let selected = isQuickSearching ? nil : quickItem(at: quickSelection).map(Self.quickItemKey)
+        scheduleQuickSearch(keepingSelected: selected)
+    }
+
+    private static func quickItemKey(_ item: QuickItem) -> String {
+        switch item {
+        case .file(let file): "file:" + file.path
+        case .hit(let hit): "hit:\(hit.occurrence):" + hit.path
+        }
+    }
+
+    /// Shows new results, selecting the item with key `selected` if it is still there.
+    private func showQuickResults(_ results: QuickSearchResults, keepingSelected selected: String?) {
+        quickResults = results
+        isQuickSearching = false
+        let index = selected.flatMap { key in
+            (0..<quickItemCount).first { quickItem(at: $0).map(Self.quickItemKey) == key }
+        }
+        setQuickSelection(index ?? 0)
+    }
+
+    func scheduleQuickSearch(debounce: Bool = true, keepingSelected selected: String? = nil) {
         quickTask?.cancel()
         guard isQuickSearchVisible || !debounce else { return }
         let query = quickQuery
@@ -219,10 +243,8 @@ extension AppModel {
         if query.trimmingCharacters(in: .whitespaces).isEmpty {
             var empty = QuickSearchResults()
             if quickMode == .files { empty.files = recentFileMatches(root: root) }
-            quickResults = empty
-            isQuickSearching = false
             quickPendingActivation = nil
-            setQuickSelection(0)
+            showQuickResults(empty, keepingSelected: selected)
             return
         }
         let filesOnly = quickMode == .files
@@ -250,12 +272,10 @@ extension AppModel {
             guard let self else { return }
             if cachedFiles == nil, self.treeGeneration == generation { self.searchFiles = files }
             guard !Task.isCancelled else { return }
-            self.quickResults = results
-            self.isQuickSearching = false
-            self.setQuickSelection(0)
+            self.showQuickResults(results, keepingSelected: selected)
             if let inNewTab = self.quickPendingActivation {
                 self.quickPendingActivation = nil
-                self.activateQuickItem(at: 0, inNewTab: inNewTab)
+                self.activateQuickItem(at: self.quickSelection, inNewTab: inNewTab)
             }
         }
     }

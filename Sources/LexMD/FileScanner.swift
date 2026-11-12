@@ -141,10 +141,13 @@ enum FileScanner {
         return ids
     }
 
-    static func filter(_ nodes: [FileNode], query: String) -> [FileNode] {
-        nodes.compactMap { node in
+    /// Keeps the files whose names (with merged folder names) contain `query`, and the folders
+    /// holding them. With `cancellable`, a cancelled task stops early with partial results.
+    static func filter(_ nodes: [FileNode], query: String, cancellable: Bool = false) -> [FileNode] {
+        if cancellable, Task.isCancelled { return [] }
+        return nodes.compactMap { node in
             if let children = node.children {
-                let kept = filter(children, query: query)
+                let kept = filter(children, query: query, cancellable: cancellable)
                 guard !kept.isEmpty else { return nil }
                 var copy = node
                 copy.children = kept
@@ -157,7 +160,7 @@ enum FileScanner {
 
     /// The tree flattened into sidebar rows. A non-empty `query` filters the tree and shows
     /// every folder expanded; otherwise folders in `expanded` show their children.
-    static func rows(_ nodes: [FileNode], query: String, expanded: Set<String>) -> [TreeRow] {
+    static func rows(_ nodes: [FileNode], query: String, expanded: Set<String>, cancellable: Bool = false) -> [TreeRow] {
         let filtering = !query.isEmpty
         var rows: [TreeRow] = []
         func walk(_ nodes: [FileNode], depth: Int) {
@@ -167,8 +170,12 @@ enum FileScanner {
                 if open, let children = node.children { walk(children, depth: depth + 1) }
             }
         }
-        walk(filtering ? filter(nodes, query: query) : nodes, depth: 0)
+        walk(filtering ? filter(nodes, query: query, cancellable: cancellable) : nodes, depth: 0)
         return rows
+    }
+
+    static func fileCount(in nodes: [FileNode]) -> Int {
+        nodes.reduce(0) { count, node in count + (node.children.map(fileCount) ?? 1) }
     }
 
     /// Paths of the files and folders in a tree.
@@ -239,7 +246,30 @@ enum FileScanner {
     }
 }
 
-/// Thin wrapper around an FSEvents stream delivering events on the main queue.
+/// What happened to a watched project folder whose path changed.
+enum ProjectFolderChange: Equatable {
+    /// Still at the same path; only something around it changed.
+    case unchanged
+    case moved(to: String)
+    case trashed(at: String)
+    case removed
+
+    /// Classifies the folder's current location, or nil when the folder no longer exists.
+    init(original: String, current: String?) {
+        guard let current else { self = .removed; return }
+        if current == original {
+            self = .unchanged
+        } else if current.split(separator: "/").contains(where: { $0 == ".Trash" || $0 == ".Trashes" }) {
+            self = .trashed(at: current)
+        } else {
+            self = .moved(to: current)
+        }
+    }
+}
+
+/// Thin wrapper around an FSEvents stream delivering events on the main queue. The stream
+/// also reports changes to the watched folder itself (kFSEventStreamEventFlagRootChanged),
+/// and `folderLocation()` follows the folder when it is renamed or moved.
 final class DirectoryWatcher {
     struct Event {
         let path: String
@@ -248,9 +278,12 @@ final class DirectoryWatcher {
 
     private var stream: FSEventStreamRef?
     private let handler: ([Event]) -> Void
+    /// An event-only descriptor for the watched folder, which follows it when it moves.
+    private let folder: Int32
 
     init?(path: String, handler: @escaping ([Event]) -> Void) {
         self.handler = handler
+        folder = open(path, O_EVTONLY)
         var context = FSEventStreamContext(version: 0, info: nil, retain: nil, release: nil, copyDescription: nil)
         context.info = Unmanaged.passUnretained(self).toOpaque()
         let callback: FSEventStreamCallback = { _, info, count, paths, flags, _ in
@@ -266,6 +299,7 @@ final class DirectoryWatcher {
         }
         let createFlags = FSEventStreamCreateFlags(
             kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer
+                | kFSEventStreamCreateFlagWatchRoot
         )
         guard let stream = FSEventStreamCreate(
             kCFAllocatorDefault, callback, &context, [path] as CFArray,
@@ -282,5 +316,19 @@ final class DirectoryWatcher {
             FSEventStreamInvalidate(stream)
             FSEventStreamRelease(stream)
         }
+        if folder >= 0 { close(folder) }
+    }
+
+    /// The watched folder's current path, or nil when it was deleted.
+    func folderLocation() -> String? {
+        guard folder >= 0 else { return nil }
+        var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        var opened = stat()
+        guard fcntl(folder, F_GETPATH, &buffer) != -1, fstat(folder, &opened) == 0 else { return nil }
+        let path = buffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+        // A deleted folder can still report its last path; make sure the path leads to this folder.
+        var found = stat()
+        guard stat(path, &found) == 0, found.st_ino == opened.st_ino, found.st_dev == opened.st_dev else { return nil }
+        return path
     }
 }

@@ -226,7 +226,7 @@ private struct ShortcutRecorder: View {
             } else if (event.keyCode == 51 || event.keyCode == 117), modifiers.isEmpty {
                 model.setShortcut(nil, for: action)
                 stopRecording()
-            } else if let shortcut = Shortcut(event: event) {
+            } else if let shortcut = Shortcut(event: event, allowingPlainKeys: action.allowsPlainKeys) {
                 model.setShortcut(shortcut, for: action)
                 stopRecording()
             } else {

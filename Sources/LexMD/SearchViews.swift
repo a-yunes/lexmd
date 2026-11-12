@@ -398,16 +398,22 @@ private struct QuickResultsList: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
             }
+            // A results refresh can keep a row further down selected.
+            .onAppear { if model.quickSelection > 0 { scroll(proxy, to: model.quickSelection) } }
             // Each new set of results gets a fresh list, scrolled to the top, so no rows or
             // scroll position carry over from an earlier query.
             .id(model.quickResultsGeneration)
             .onChange(of: model.quickSelection) { _, selection in
-                switch model.quickItem(at: selection) {
-                case .file(let file): proxy.scrollTo(file.id)
-                case .hit(let hit): proxy.scrollTo(hit.id)
-                case nil: break
-                }
+                scroll(proxy, to: selection)
             }
+        }
+    }
+
+    private func scroll(_ proxy: ScrollViewProxy, to selection: Int) {
+        switch model.quickItem(at: selection) {
+        case .file(let file): proxy.scrollTo(file.id)
+        case .hit(let hit): proxy.scrollTo(hit.id)
+        case nil: break
         }
     }
 }

@@ -39,10 +39,15 @@ struct Shortcut: Hashable {
         self.init(key: key, modifiers: flags)
     }
 
-    /// Builds a shortcut from a key press. Requires ⌘, ⌃ or ⌥ so plain typing never becomes a shortcut.
-    init?(event: NSEvent) {
+    /// Keys that `allowingPlainKeys` accepts without ⌘, ⌃ or ⌥.
+    private static let plainKeys: Set<String> = ["return", "space"]
+
+    /// Builds a shortcut from a key press. Requires ⌘, ⌃ or ⌥ so plain typing never becomes a
+    /// shortcut; with `allowingPlainKeys`, Return and Space work alone too.
+    init?(event: NSEvent, allowingPlainKeys: Bool = false) {
         let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
-        guard !flags.intersection([.command, .control, .option]).isEmpty else { return nil }
+        guard !flags.intersection([.command, .control, .option]).isEmpty
+            || allowingPlainKeys && Self.specialKeys[event.keyCode].map(Self.plainKeys.contains) == true else { return nil }
         if let special = Self.specialKeys[event.keyCode] {
             self.init(key: special, modifiers: flags)
             return
@@ -91,6 +96,13 @@ struct Shortcut: Hashable {
         return KeyboardShortcut(equivalent, modifiers: eventModifiers)
     }
 
+    /// Whether a key press in a SwiftUI view is this shortcut.
+    func matches(_ key: KeyEquivalent, modifiers: EventModifiers) -> Bool {
+        guard let shortcut = keyboardShortcut else { return false }
+        let pressed = modifiers.intersection([.command, .shift, .option, .control])
+        return shortcut.modifiers == pressed && shortcut.key.character.lowercased() == key.character.lowercased()
+    }
+
     static func == (lhs: Shortcut, rhs: Shortcut) -> Bool { lhs.string == rhs.string }
     func hash(into hasher: inout Hasher) { hasher.combine(string) }
 }
@@ -111,12 +123,14 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case exportPDF, exportHTML, printDocument, copyRichText
     case toggleOutline
     case installCommandLineTool
+    case renameInSidebar, trashInSidebar
 
     var id: String { rawValue }
 
     enum Category: String, CaseIterable {
         case file = "File", navigate = "Navigate", find = "Find", view = "View", format = "Format"
         case sourceControl = "Source Control"
+        case sidebar = "Sidebar"
     }
 
     var category: Category {
@@ -134,6 +148,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .commit: .sourceControl
         case .exportPDF, .exportHTML, .printDocument, .copyRichText: .file
         case .installCommandLineTool: .file
+        case .renameInSidebar, .trashInSidebar: .sidebar
         }
     }
 
@@ -183,8 +198,14 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .copyRichText: "Copy as Rich Text"
         case .toggleOutline: "Show/Hide Outline"
         case .installCommandLineTool: "Install Command Line Tool…"
+        case .renameInSidebar: "Rename in Sidebar"
+        case .trashInSidebar: "Move to Trash in Sidebar"
         }
     }
+
+    /// Sidebar commands act only while the file list has focus, so they may use a key
+    /// without modifiers, such as Return.
+    var allowsPlainKeys: Bool { category == .sidebar }
 
     var defaultShortcut: Shortcut? {
         let value: String = switch self {
@@ -232,6 +253,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .copyRichText: "option+cmd+c"
         case .toggleOutline: "option+cmd+o"
         case .installCommandLineTool: ""
+        case .renameInSidebar: "return"
+        case .trashInSidebar: "cmd+delete"
         }
         return Shortcut(string: value)
     }
