@@ -10,7 +10,11 @@
   document, and the editor suggests files, images and headings while you type a link.
 - Tabs: press ⌘T or the + button to pick a file for a new tab, Command-click a file, choose Open
   in New Tab, or press ⌘↩ in Open Quickly. Open tabs return when the project opens again.
-- Open Quickly matches names typed with their extension, such as `readme.md`.
+- Open Quickly matches names typed with their extension, such as `readme.md`, and updates its
+  results when files change while it is open.
+- LexMD follows a project folder that is renamed or moved, and closes one that is deleted after
+  keeping any unsaved changes. Expanded folders are remembered for each recent project.
+- Rename (↩) and Move to Trash (⌘⌫) in the sidebar can be changed in Settings > Shortcuts.
 - Create, rename, duplicate, move and trash files and folders in the sidebar. Renaming or moving
   a document offers to update every link to it, and the change can be undone.
 - Export as PDF (⇧⌘E) or HTML, Print (⌥⌘P), and Copy as Rich Text (⌥⌘C), with diagrams and math

@@ -31,6 +31,7 @@ final class AppModel {
             searchFiles = nil
             updateDisplayTree()
             linksTreeDidChange()
+            if isQuickSearchVisible { refreshQuickSearchForTree() }
         }
     }
     /// The tree as displayed: compacted when the setting is on, before filtering.
@@ -54,7 +55,7 @@ final class AppModel {
     private(set) var isFiltering = false
     var expanded: Set<String> = [] {
         didSet {
-            defaults.set(Array(expanded), forKey: Keys.expanded)
+            persistExpanded()
             if !isFiltering { updateVisibleRows() }
         }
     }
@@ -193,6 +194,10 @@ final class AppModel {
     @ObservationIgnored private var renderTask: Task<Void, Never>?
     @ObservationIgnored private var scanTask: Task<Void, Never>?
     @ObservationIgnored private var scanRoot: URL?
+    @ObservationIgnored private var rowsTask: Task<Void, Never>?
+    @ObservationIgnored private var displayFileCount = 0
+    /// Expanded folders by project, for the recent projects.
+    @ObservationIgnored private var expandedByProject: [String: [String]]?
     @ObservationIgnored private var rescanAfterScan = false
     /// Changes whenever `tree` is set, so work started on an older tree can tell.
     @ObservationIgnored private(set) var treeGeneration = 0
@@ -214,7 +219,9 @@ final class AppModel {
     enum Keys {
         static let root = "rootPath"
         static let lastFile = "lastFile"
+        /// Expanded folders of every project in one list (LexMD 1.0); read once to migrate.
         static let expanded = "expanded"
+        static let expandedByProject = "expandedFolders"
         static let viewMode = "viewMode"
         static let fontScale = "fontScale"
         static let recentFolders = "recentFolders"
@@ -294,12 +301,56 @@ final class AppModel {
 
     func updateDisplayTree() {
         let tree = treeWithNewFolders(self.tree)
+        displayFileCount = FileScanner.fileCount(in: tree)
         displayTree = compactFolders ? FileScanner.compact(tree) : tree
         displayFolderIDs = FileScanner.folderIDs(in: displayTree)
     }
 
+    /// Projects with more files than this filter the sidebar off the main thread.
+    static var backgroundFilterThreshold = 3000
+
+    /// Rebuilds the sidebar rows. Filtering a large project runs in the background, and the
+    /// rows update when it finishes; a newer keystroke cancels it.
     private func updateVisibleRows() {
-        visibleRows = FileScanner.rows(displayTree, query: filter.trimmingCharacters(in: .whitespaces), expanded: expanded)
+        rowsTask?.cancel()
+        rowsTask = nil
+        let query = filter.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty, displayFileCount > Self.backgroundFilterThreshold else {
+            visibleRows = FileScanner.rows(displayTree, query: query, expanded: expanded)
+            return
+        }
+        let tree = displayTree
+        let expanded = expanded
+        rowsTask = Task { [weak self] in
+            let rows = await runDetached { FileScanner.rows(tree, query: query, expanded: expanded, cancellable: true) }
+            guard let self, !Task.isCancelled else { return }
+            self.rowsTask = nil
+            self.visibleRows = rows
+        }
+    }
+
+    private func persistExpanded() {
+        guard let root = rootURL?.path else { return }
+        var all = storedExpandedFolders()
+        all[root] = Array(expanded)
+        let known = Set(recentFolders).union([root])
+        all = all.filter { known.contains($0.key) }
+        expandedByProject = all
+        defaults.set(all, forKey: Keys.expandedByProject)
+    }
+
+    private func storedExpandedFolders() -> [String: [String]] {
+        if let expandedByProject { return expandedByProject }
+        var all = defaults.dictionary(forKey: Keys.expandedByProject) as? [String: [String]] ?? [:]
+        if let legacy = defaults.stringArray(forKey: Keys.expanded) {
+            for project in recentFolders where all[project] == nil {
+                all[project] = legacy.filter { $0.hasPrefix(project + "/") }
+            }
+            defaults.set(all, forKey: Keys.expandedByProject)
+            defaults.removeObject(forKey: Keys.expanded)
+        }
+        expandedByProject = all
+        return all
     }
 
     func isExpanded(_ node: FileNode) -> Bool {
@@ -396,16 +447,19 @@ final class AppModel {
             tree = []
             filter = ""
             let root = normalized.path
-            let stored = defaults.stringArray(forKey: Keys.expanded) ?? []
-            expanded = Set(stored.filter { $0.hasPrefix(root + "/") })
+            expanded = Set(storedExpandedFolders()[root] ?? [])
             defaults.set(root, forKey: Keys.root)
             recentFolders = Array(([root] + recentFolders.filter { $0 != root }).prefix(10))
             defaults.set(recentFolders, forKey: Keys.recentFolders)
-            watcher = DirectoryWatcher(path: root) { [weak self] events in
-                MainActor.assumeIsolated { self?.handleFileEvents(events) }
-            }
+            watch(root)
         }
         rescan()
+    }
+
+    private func watch(_ root: String) {
+        watcher = DirectoryWatcher(path: root) { [weak self] events in
+            MainActor.assumeIsolated { self?.handleFileEvents(events) }
+        }
     }
 
     func reveal(_ path: String) {
@@ -460,6 +514,10 @@ final class AppModel {
 
     private func handleFileEvents(_ events: [DirectoryWatcher.Event]) {
         guard let root = rootURL?.path else { return }
+        if events.contains(where: { Int($0.flags) & kFSEventStreamEventFlagRootChanged != 0 }) {
+            projectFolderChanged()
+            return
+        }
         linksHandleFileEvents(events, root: root)
         gitFileEvents(events)
         var structural = false
@@ -479,6 +537,137 @@ final class AppModel {
         }
         if structural { scheduleRescan() }
         if currentChanged { reloadFromDiskIfNeeded() }
+    }
+
+    // MARK: - Project folder changes
+
+    /// The project folder, or a folder above it, was renamed, moved, or deleted. A moved
+    /// project is followed; a deleted one closes once its unsaved changes are safe.
+    func projectFolderChanged() {
+        guard let root = rootURL?.path else { return }
+        let name = (root as NSString).lastPathComponent
+        switch ProjectFolderChange(original: root, current: watcher?.folderLocation()) {
+        case .unchanged:
+            rescanSoon()
+            filesDidChange(structure: true)
+        case .moved(let newRoot):
+            followProjectMove(to: newRoot)
+        case .trashed(let trashed):
+            // Keep unsaved changes with the folder in the Trash, so Put Back brings them along.
+            let move = PathMove(from: root, to: trashed)
+            let unwritten = unsavedDocuments().filter { document in
+                guard let target = move.map(document.path) else { return true }
+                return (try? document.text.write(toFile: target, atomically: false, encoding: .utf8)) == nil
+            }
+            closeProjectKeeping(unwritten, name: name)
+        case .removed:
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: root, isDirectory: &isDirectory), isDirectory.boolValue {
+                // Another folder took its place: watch that one.
+                watch(root)
+                rescan()
+                filesDidChange(structure: true)
+                return
+            }
+            closeProjectKeeping(unsavedDocuments(), name: name)
+        }
+    }
+
+    /// Points everything at the project's new location: the sidebar, the open documents (so
+    /// autosave writes to the moved files), tabs, history, and saved settings.
+    func followProjectMove(to newRoot: String) {
+        guard let oldRoot = rootURL?.path, newRoot != oldRoot else { return }
+        let move = PathMove(from: oldRoot, to: newRoot)
+        let remap = { (path: String) in move.map(path) ?? path }
+        rootURL = URL(fileURLWithPath: newRoot, isDirectory: true)
+        if let current = currentFile?.path, let moved = move.map(current) {
+            currentFile = URL(fileURLWithPath: moved)
+            defaults.set(moved, forKey: Keys.lastFile)
+        }
+        if let selected = selectedPath, let moved = move.map(selected) { selectedPath = moved }
+        sidebarFiles.newFolders = Set(sidebarFiles.newFolders.map(remap))
+        if let renaming = sidebarFiles.renamingPath { sidebarFiles.renamingPath = remap(renaming) }
+        tree = tree.map { FileTreeEdit.rebased($0, to: newRoot + "/" + $0.name) }
+        recentFolders = Array(([newRoot] + recentFolders.filter { $0 != oldRoot && $0 != newRoot }).prefix(10))
+        defaults.set(recentFolders, forKey: Keys.recentFolders)
+        defaults.set(newRoot, forKey: Keys.root)
+        expanded = Set(expanded.map(remap))
+        history = history.map(remap)
+        recentFiles = recentFiles.map(remap)
+        defaults.set(recentFiles, forKey: Keys.recentFiles)
+        tabStore.list.remap { move.map($0) }
+        persistTabs()
+        watch(newRoot)
+        saveNow()
+        render(debounce: false)
+        rescan()
+        filesDidChange(structure: true)
+    }
+
+    /// Text that is not on disk: the open document's edits and tabs whose saves failed.
+    func unsavedDocuments() -> [(path: String, text: String)] {
+        var documents: [(path: String, text: String)] = []
+        if let current = currentFile?.path, text != savedText { documents.append((current, text)) }
+        for tab in tabStore.list.tabs where tab.id != tabStore.list.activeID {
+            if let unsaved = tab.state.unsavedText { documents.append((tab.path, unsaved)) }
+        }
+        return documents
+    }
+
+    /// Closes a project whose folder is gone, first offering to save `documents` elsewhere.
+    private func closeProjectKeeping(_ documents: [(path: String, text: String)], name: String) {
+        guard !documents.isEmpty else { closeProject(); return }
+        let alert = NSAlert()
+        alert.messageText = "“\(name)” is no longer available"
+        let what = documents.count == 1
+            ? "Changes to “\((documents[0].path as NSString).lastPathComponent)”"
+            : "Changes to \(documents.count) documents"
+        alert.informativeText = "\(what) couldn’t be saved because the project folder is gone. Save them in another folder to keep them."
+        alert.addButton(withTitle: "Save to Folder…")
+        alert.addButton(withTitle: "Discard Changes")
+        present(alert) { [weak self] response in
+            guard let self else { return }
+            guard response == .alertFirstButtonReturn else { self.closeProject(); return }
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.canCreateDirectories = true
+            panel.prompt = "Save"
+            panel.message = "Choose a folder for the unsaved documents."
+            guard panel.runModal() == .OK, let folder = panel.url else {
+                self.closeProjectKeeping(documents, name: name)
+                return
+            }
+            do {
+                for document in documents {
+                    let file = (document.path as NSString).lastPathComponent as NSString
+                    let target = FileOperations.uniqueURL(in: folder, base: file.deletingPathExtension, extension: file.pathExtension)
+                    try document.text.write(to: target, atomically: true, encoding: .utf8)
+                }
+                self.closeProject()
+            } catch {
+                NSAlert(error: error).runModal()
+                self.closeProjectKeeping(documents, name: name)
+            }
+        }
+    }
+
+    /// Closes the open project; its unsaved changes have already been kept or discarded.
+    private func closeProject() {
+        savedText = text
+        closeTabsForProjectChange()
+        watcher = nil
+        scanTask?.cancel()
+        scanTask = nil
+        rescanTask?.cancel()
+        if isQuickSearchVisible { closeQuickSearch() }
+        rootURL = nil
+        tree = []
+        filter = ""
+        expanded = []
+        isScanning = false
+        defaults.removeObject(forKey: Keys.root)
+        gitProjectScanned()
     }
 
     /// Follows a link clicked in the preview.
@@ -571,10 +760,7 @@ final class AppModel {
     }
 
     private static func read(_ url: URL) -> String? {
-        if let s = try? String(contentsOf: url, encoding: .utf8) { return s }
-        var encoding = String.Encoding.utf8
-        if let s = try? String(contentsOf: url, usedEncoding: &encoding) { return s }
-        return try? String(contentsOf: url, encoding: .isoLatin1)
+        DocumentText.read(url)
     }
 
     private func textDidChange(_ newText: String) {
