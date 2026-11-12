@@ -29,6 +29,8 @@ struct MarkdownExtensions {
     /// The source with tokens in place of extension syntax.
     private(set) var source: String
     private(set) var items: [Item] = []
+    /// The UTF-8 byte range in the original source that each item replaced.
+    private(set) var itemRanges: [Range<Int>] = []
     /// Referenced footnotes in numbering order.
     private(set) var footnotes: [Footnote] = []
 
@@ -56,9 +58,10 @@ struct MarkdownExtensions {
         var numbers: [String: Int] = [:]
         var i = 0
         var next = 0 // index into skip
-        func emitToken(_ item: Item) {
+        func emitToken(_ item: Item, _ range: Range<Int>) {
             out.append(contentsOf: Array("\(Self.tokenStart)\(items.count)\(Self.tokenEnd)".utf8))
             items.append(item)
+            itemRanges.append(range)
         }
         while i < bytes.count {
             while next < skip.count, skip[next].upperBound <= i { next += 1 }
@@ -82,7 +85,7 @@ struct MarkdownExtensions {
                 continue
             }
             if byte == 0x24, mayHaveMath, let (end, item) = Self.math(bytes, at: i, limit: barrier) {
-                emitToken(item)
+                emitToken(item, i..<end)
                 i = end
                 continue
             }
@@ -99,7 +102,7 @@ struct MarkdownExtensions {
                 }
                 footnotes[number - 1].references += 1
                 let raw = String(decoding: bytes[i..<end], as: UTF8.self)
-                emitToken(.footnoteRef(number: number, occurrence: footnotes[number - 1].references, source: raw))
+                emitToken(.footnoteRef(number: number, occurrence: footnotes[number - 1].references, source: raw), i..<end)
                 i = end
                 continue
             }
@@ -125,6 +128,11 @@ struct MarkdownExtensions {
                 body(start..<index, items[n])
             }
         }
+    }
+
+    /// Whether text holds a placeholder.
+    static func containsToken(_ text: String) -> Bool {
+        text.unicodeScalars.contains(tokenStart)
     }
 
     /// Puts the original syntax back, for attributes, slugs, and other plain-text contexts.

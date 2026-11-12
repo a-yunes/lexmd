@@ -35,7 +35,8 @@ final class TestFolder {
 
 struct TimedOut: Error {}
 
-/// Polls `condition` until it holds, failing after `seconds`.
+/// Polls `condition` until it holds, failing after `seconds`. The default is generous because
+/// other main-actor tests in the parallel run can hold the main thread for seconds at a time.
 @MainActor
 func waitUntil(seconds: Double = 30, _ condition: () async throws -> Bool) async throws {
     let deadline = Date().addingTimeInterval(seconds)

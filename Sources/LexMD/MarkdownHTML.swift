@@ -2,24 +2,27 @@ import Foundation
 import Markdown
 
 enum MarkdownHTML {
-    static func render(_ source: String) -> String {
+    /// `links` resolves wiki links and marks broken local links; without it they render as text.
+    static func render(_ source: String, links: LinkContext? = nil) -> String {
         var body = source
         var prefix = ""
         if let (frontMatter, rest) = splitFrontMatter(source) {
             prefix = FrontMatter.html(frontMatter) ?? "<pre class=\"frontmatter\"><code>\(escape(frontMatter))</code></pre>\n"
             body = rest
         }
-        return prefix + renderBody(body, footnotes: true)
+        return prefix + renderBody(body, footnotes: true, links: links)
     }
 
     /// Renders Markdown with math, diagrams, and optionally footnotes (see `MarkdownExtensions`).
-    static func renderBody(_ source: String, footnotes: Bool) -> String {
+    /// Footnote bodies get the same link context, so their wiki links and broken links render too.
+    static func renderBody(_ source: String, footnotes: Bool, links: LinkContext? = nil) -> String {
         let extensions = MarkdownExtensions(source, footnotes: footnotes)
         let document = Document(parsing: extensions.source)
         var renderer = HTMLRenderer()
         renderer.extensions = extensions
+        renderer.links = links
         renderer.visit(document)
-        return extensions.finish(renderer.result) + extensions.footnotesHTML { renderBody($0, footnotes: false) }
+        return extensions.finish(renderer.result) + extensions.footnotesHTML { renderBody($0, footnotes: false, links: links) }
     }
 
     /// Fenced code in these languages is drawn as a diagram by the preview.
@@ -72,6 +75,8 @@ enum MarkdownHTML {
 
 private struct HTMLRenderer: MarkupWalker {
     var result = ""
+    var links: LinkContext?
+    private var linkDepth = 0
     private var slugCounts: [String: Int] = [:]
     private var inTableHead = false
     private var alignments: [Table.ColumnAlignment?] = []
@@ -213,6 +218,10 @@ private struct HTMLRenderer: MarkupWalker {
     // MARK: Inlines
 
     mutating func visitText(_ text: Text) {
+        if linkDepth == 0, links != nil {
+            result += links!.html(forText: text.string, restore: extensions.restore)
+            return
+        }
         result += esc(text.string)
     }
 
@@ -233,9 +242,14 @@ private struct HTMLRenderer: MarkupWalker {
     }
 
     mutating func visitLink(_ link: Link) {
-        let href = link.destination.map { " href=\"\(esc(extensions.restore($0)))\"" } ?? ""
+        let destination = link.destination.map { extensions.restore($0) }
+        let href = destination.map { " href=\"\(esc($0))\"" } ?? ""
         let title = link.title.map { " title=\"\(esc(extensions.restore($0)))\"" } ?? ""
-        result += "<a\(href)\(title)>\(capture(link))</a>"
+        var linkClass = ""
+        if let destination { linkClass = links?.linkClass(forDestination: destination) ?? "" }
+        linkDepth += 1
+        result += "<a\(href)\(title)\(linkClass)>\(capture(link))</a>"
+        linkDepth -= 1
     }
 
     mutating func visitImage(_ image: Image) {

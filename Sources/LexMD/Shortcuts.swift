@@ -106,6 +106,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case focusMode, typewriterScrolling
     case commit
     case exportPDF, exportHTML, printDocument, copyRichText
+    case toggleOutline
 
     var id: String { rawValue }
 
@@ -120,6 +121,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .goBack, .goForward: .navigate
         case .find, .findNext, .findPrevious, .findInFiles: .find
         case .toggleSidebar, .editorOnly, .split, .previewOnly, .expandAll, .collapseAll, .zoomIn, .zoomOut, .zoomReset: .view
+        case .toggleOutline: .view
         case .bold, .italic, .strikethrough, .inlineCode, .link: .format
         case .formatTable: .format
         case .focusMode, .typewriterScrolling: .view
@@ -163,6 +165,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .exportHTML: "Export as HTML…"
         case .printDocument: "Print…"
         case .copyRichText: "Copy as Rich Text"
+        case .toggleOutline: "Show/Hide Outline"
         }
     }
 
@@ -201,6 +204,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .exportHTML: ""
         case .printDocument: "option+cmd+p"
         case .copyRichText: "option+cmd+c"
+        case .toggleOutline: "option+cmd+o"
         }
         return Shortcut(string: value)
     }

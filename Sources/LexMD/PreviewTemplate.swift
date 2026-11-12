@@ -258,6 +258,9 @@ mark.lexmd-hit.current {
 .tok-ins { color: var(--ins); }
 .tok-del { color: var(--del); }
 .tok-hunk { color: var(--hunk); }
+/* Links: wiki links to missing documents, and local links whose file or heading is gone. */
+.lexmd-missing { color: var(--tertiary); border-bottom: 1px dashed currentColor; cursor: default; }
+a.lexmd-broken { color: var(--caution); text-decoration: underline wavy color-mix(in srgb, var(--caution) 60%, transparent); text-underline-offset: 0.2em; text-decoration-thickness: 1px; }
 /* Printing and PDF export: light colors, full width, and page breaks that keep blocks readable. */
 @media print {
   :root {
@@ -452,6 +455,45 @@ mark.lexmd-hit.current {
       if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   });
+
+  // Outline: scroll to a heading, and report the heading in view as the page scrolls or changes.
+  var spyId = null, spyHold = 0, spyTimer = null;
+  function headingInView() {
+    // Headings drawn inside diagrams, math, or footnotes are not document headings.
+    var hs = Array.prototype.filter.call(content.querySelectorAll('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]'), function (h) {
+      return !h.closest('.lexmd-diagram, .lexmd-diagram-view, .lexmd-math, svg, .footnotes');
+    });
+    var limit = Math.min(140, window.innerHeight * 0.3), id = '';
+    var atEnd = window.scrollY > 0 && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2;
+    for (var i = 0; i < hs.length; i++) {
+      var top = hs[i].getBoundingClientRect().top;
+      if (top <= limit || (atEnd && top < window.innerHeight)) id = hs[i].id; else break;
+    }
+    return id;
+  }
+  function reportHeading(id) {
+    if (id === spyId) return;
+    spyId = id;
+    window.webkit.messageHandlers.lexmd.postMessage({ type: 'heading', id: id });
+  }
+  function queueSpy() {
+    if (spyTimer) return;
+    spyTimer = setTimeout(function () {
+      spyTimer = null;
+      if (Date.now() >= spyHold) reportHeading(headingInView());
+    }, 60);
+  }
+  window.addEventListener('scroll', queueSpy, { passive: true });
+  window.addEventListener('resize', queueSpy);
+  new MutationObserver(queueSpy).observe(content, { childList: true });
+  window.lexmdReveal = function (id, smooth) {
+    var target = document.getElementById(id);
+    if (!target) return false;
+    spyHold = smooth ? Date.now() + 700 : 0;
+    target.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
+    reportHeading(id);
+    return true;
+  };
 
   var KW = {};
   ('abstract actor and any as assert associatedtype async await break case catch class const constexpr continue ' +

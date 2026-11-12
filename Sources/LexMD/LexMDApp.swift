@@ -123,6 +123,7 @@ struct LexMDCommands: Commands {
         }
         CommandGroup(before: .sidebar) {
             item(.toggleSidebar) { model.toggleSidebar() }
+            item(.toggleOutline) { model.toggleOutline() }
             Divider()
             item(.previewOnly) { model.setViewMode(.read) }
             item(.split) { model.setViewMode(.split) }
