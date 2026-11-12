@@ -108,30 +108,33 @@ extension AppModel {
     static var askAboutUnsavedText: (
         _ documents: [(path: String, text: String)], _ action: String, _ reply: @escaping (UnsavedTextChoice) -> Void
     ) -> Void = { documents, action, reply in
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = documents.count == 1
-            ? "Changes to “\((documents[0].path as NSString).lastPathComponent)” couldn’t be saved."
-            : "Changes to \(documents.count) documents couldn’t be saved."
-        alert.informativeText = "Save them in another folder to keep them, or discard them to \(action)."
-        alert.addButton(withTitle: "Save to Folder…")
-        alert.addButton(withTitle: "Discard Changes")
-        alert.addButton(withTitle: "Cancel")
-        AppModel.shared.present(alert) { response in
+        let model = AppModel.shared
+        model.present(AppModel.unsavedTextAlert(documents, action)) { response in
             switch response {
             case .alertFirstButtonReturn:
-                let panel = NSOpenPanel()
-                panel.canChooseFiles = false
-                panel.canChooseDirectories = true
-                panel.canCreateDirectories = true
-                panel.prompt = "Save"
-                panel.message = "Choose a folder for the unsaved documents."
-                reply(panel.runModal() == .OK ? panel.url.map(UnsavedTextChoice.saveToFolder) ?? .cancel : .cancel)
+                // Starts once the alert's sheet has ended.
+                let panel = AppModel.unsavedDocumentsFolderPanel()
+                model.present(panel) { response in
+                    reply(response == .OK ? panel.url.map(UnsavedTextChoice.saveToFolder) ?? .cancel : .cancel)
+                }
             case .alertSecondButtonReturn:
                 reply(.discard)
             default:
                 reply(.cancel)
             }
         }
+    }
+
+    static func unsavedTextAlert(_ documents: [(path: String, text: String)], _ action: String) -> NSAlert {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = documents.count == 1
+            ? "Changes to “\((documents[0].path as NSString).lastPathComponent)” couldn’t be saved"
+            : "Changes to \(documents.count) documents couldn’t be saved"
+        alert.informativeText = "Save them in another folder to keep them, or discard them to \(action)."
+        alert.addButton(withTitle: "Save to Folder…")
+        alert.addDestructiveButton("Discard Changes")
+        alert.addCancelButton()
+        return alert
     }
 }

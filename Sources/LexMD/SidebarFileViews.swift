@@ -33,7 +33,7 @@ struct FileActionMenuItems: View {
                 .disabled(url.path == model.currentFile?.path)
             Divider()
         }
-        Button("New File") { model.newFile(near: url) }
+        Button("New Document") { model.newFile(near: url) }
         Button("New Folder") { model.newFolder(near: url) }
         Divider()
         Button("Rename") { model.beginRename(url) }
@@ -49,11 +49,11 @@ struct SidebarBackgroundMenu: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        Button("New File") { model.newFile(near: nil) }
+        Button("New Document") { model.newFile(near: nil) }
         Button("New Folder") { model.newFolder(near: nil) }
         if let root = model.rootURL {
             Divider()
-            Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([root]) }
+            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([root]) }
         }
     }
 }

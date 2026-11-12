@@ -74,6 +74,8 @@ extension AppModel {
         guard let folder = folder(for: url) else { showOpenPanel(); return }
         do {
             let file = try FileOperations.createFile(in: folder)
+            // The sidebar filter could hide the new row and its name field.
+            if isFiltering { filter = "" }
             if let root = rootURL?.path {
                 tree = FileTreeEdit.inserting(FileNode(url: file, name: file.lastPathComponent, children: nil),
                                               into: tree, parent: folder.path, root: root)
@@ -86,7 +88,7 @@ extension AppModel {
             rescanSoon()
             filesDidChange(structure: true)
         } catch {
-            showFileProblem("Couldn’t create a document.", error)
+            showFileProblem("Couldn’t create a document", error)
         }
     }
 
@@ -101,7 +103,7 @@ extension AppModel {
             sidebarFiles.renameIsNewDocument = false
             sidebarFiles.renamingPath = created.path
         } catch {
-            showFileProblem("Couldn’t create a folder.", error)
+            showFileProblem("Couldn’t create a folder", error)
         }
     }
 
@@ -134,7 +136,7 @@ extension AppModel {
         case .unchanged:
             break
         case .invalid(let message):
-            showFileProblem("Couldn’t rename “\(url.lastPathComponent)”.", message)
+            showFileProblem("Couldn’t rename “\(url.lastPathComponent)”", message)
         case .valid(let name, let leavesSidebar):
             let move = PathMove(from: path, to: url.deletingLastPathComponent().appendingPathComponent(name).path)
             guard leavesSidebar else {
@@ -143,9 +145,9 @@ extension AppModel {
             }
             let alert = NSAlert()
             alert.messageText = "Use “\(name)”?"
-            alert.informativeText = "It isn’t a Markdown name, so the file won’t appear in the sidebar."
+            alert.informativeText = "Without a Markdown extension such as .md, the document won’t appear in the sidebar."
             alert.addButton(withTitle: "Rename")
-            alert.addButton(withTitle: "Cancel")
+            alert.addCancelButton()
             present(alert) { [weak self] response in
                 if response == .alertFirstButtonReturn { self?.performMove(move, actionName: "Rename", offerLinks: true) }
             }
@@ -172,17 +174,19 @@ extension AppModel {
         panel.allowsMultipleSelection = false
         panel.directoryURL = url.deletingLastPathComponent()
         panel.prompt = "Move"
-        panel.message = "Choose a folder in \(root.lastPathComponent) to move \(url.lastPathComponent) to."
-        guard panel.runModal() == .OK, let folder = panel.url else { return }
-        let target = FileScanner.canonicalPath(folder.path)
-        guard target == root.path || target.hasPrefix(root.path + "/") else {
-            let alert = NSAlert()
-            alert.messageText = "Choose a folder inside the project"
-            alert.informativeText = "LexMD moves files only within \(root.lastPathComponent)."
-            present(alert) { _ in }
-            return
+        panel.message = "Choose a folder in “\(root.lastPathComponent)” to move “\(url.lastPathComponent)” to."
+        present(panel) { [weak self] response in
+            guard let self, response == .OK, let folder = panel.url else { return }
+            let target = FileScanner.canonicalPath(folder.path)
+            guard target == root.path || target.hasPrefix(root.path + "/") else {
+                let alert = NSAlert()
+                alert.messageText = "Choose a folder inside the project"
+                alert.informativeText = "LexMD moves items only within “\(root.lastPathComponent)”."
+                self.present(alert) { _ in }
+                return
+            }
+            _ = self.moveItems([url], into: folder)
         }
-        _ = moveItems([url], into: folder)
     }
 
     @discardableResult
@@ -199,7 +203,7 @@ extension AppModel {
         for source in inside where (source as NSString).deletingLastPathComponent != target {
             let name = (source as NSString).lastPathComponent
             if let problem = FileOperations.moveProblem(source, into: target) {
-                showFileProblem("Couldn’t move “\(name)”.", problem)
+                showFileProblem("Couldn’t move “\(name)”", problem)
                 continue
             }
             let move = PathMove(from: source, to: (target as NSString).appendingPathComponent(name))
@@ -218,7 +222,7 @@ extension AppModel {
         do {
             try FileOperations.move(URL(fileURLWithPath: move.from), to: URL(fileURLWithPath: move.to))
         } catch {
-            showFileProblem("Couldn’t \(actionName.lowercased()) “\((move.from as NSString).lastPathComponent)”.", error)
+            showFileProblem("Couldn’t \(actionName.lowercased()) “\((move.from as NSString).lastPathComponent)”", error)
             return false
         }
         applyMove(move)
@@ -293,7 +297,7 @@ extension AppModel {
                     undo.setActionName("Duplicate")
                 }
             case .failure(let error):
-                self.showFileProblem("Couldn’t duplicate “\(url.lastPathComponent)”.", error)
+                self.showFileProblem("Couldn’t duplicate “\(url.lastPathComponent)”", error)
             }
         }
     }
@@ -303,16 +307,20 @@ extension AppModel {
     func confirmMoveToTrash(_ url: URL) {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { NSSound.beep(); return }
-        let alert = NSAlert()
-        alert.messageText = "Move “\(url.lastPathComponent)” to the Trash?"
-        alert.informativeText = isDirectory.boolValue
-            ? "The folder and everything in it move to the Trash. You can put them back from there."
-            : "You can put it back from the Trash."
-        alert.addButton(withTitle: "Move to Trash")
-        alert.addButton(withTitle: "Cancel")
-        present(alert) { [weak self] response in
+        present(Self.trashConfirmation(name: url.lastPathComponent, isFolder: isDirectory.boolValue)) { [weak self] response in
             if response == .alertFirstButtonReturn { self?.moveToTrash(url) }
         }
+    }
+
+    static func trashConfirmation(name: String, isFolder: Bool) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = "Move “\(name)” to the Trash?"
+        alert.informativeText = isFolder
+            ? "The folder and everything in it move to the Trash. You can put them back from there."
+            : "You can put it back from the Trash."
+        alert.addDestructiveButton("Move to Trash")
+        alert.addCancelButton()
+        return alert
     }
 
     /// Moves an item to the Trash through the system (never deletes), then closes its tabs.
@@ -329,7 +337,7 @@ extension AppModel {
             } catch {
                 self?.sidebarFiles.trashing.remove(path)
                 self?.saveNow()
-                self?.showFileProblem("Couldn’t move “\(url.lastPathComponent)” to the Trash.", error)
+                self?.showFileProblem("Couldn’t move “\(url.lastPathComponent)” to the Trash", error)
             }
         }
     }
@@ -372,7 +380,7 @@ extension AppModel {
         do {
             try FileOperations.move(trashed, to: URL(fileURLWithPath: path))
         } catch {
-            showFileProblem("Couldn’t put “\((path as NSString).lastPathComponent)” back.", error)
+            showFileProblem("Couldn’t put “\((path as NSString).lastPathComponent)” back", error)
             return
         }
         reveal(path)
@@ -409,21 +417,27 @@ extension AppModel {
     }
 
     private func askToUpdateLinks(_ plan: LinkUpdatePlan, context: LinkRewriter.Context, root: String) {
+        present(Self.linkUpdateAlert(plan, root: root)) { [weak self] response in
+            if response == .alertFirstButtonReturn { self?.applyLinkUpdate(plan, context: context) }
+        }
+    }
+
+    static func linkUpdateAlert(_ plan: LinkUpdatePlan, root: String) -> NSAlert {
         let links = plan.linkCount
         let files = plan.files.count
         let alert = NSAlert()
-        alert.messageText = "Update \(links) \(links == 1 ? "link" : "links") in \(files) \(files == 1 ? "file" : "files")?"
-        var names = plan.files.prefix(8).map { file in
+        alert.messageText = String(AttributedString(
+            localized: "Update ^[\(links) link](inflect: true) in ^[\(files) document](inflect: true)?"
+        ).characters)
+        let names = plan.files.map { file in
             let relative = file.path.hasPrefix(root + "/") ? String(file.path.dropFirst(root.count + 1)) : file.path
             return "\(relative) (\(file.count))"
         }
-        if files > 8 { names.append("and \(files - 8) more") }
-        alert.informativeText = "These links still point to the old location:\n\n" + names.joined(separator: "\n")
+        let intro = links == 1 ? "This link still points to the old location:" : "These links still point to the old location:"
+        alert.informativeText = intro + "\n\n" + listing(names)
         alert.addButton(withTitle: "Update")
-        alert.addButton(withTitle: "Don’t Update")
-        present(alert) { [weak self] response in
-            if response == .alertFirstButtonReturn { self?.applyLinkUpdate(plan, context: context) }
-        }
+        alert.addCancelButton("Don’t Update")
+        return alert
     }
 
     /// Rewrites links: the open document through the editor (nothing unsaved is lost), documents
@@ -464,7 +478,10 @@ extension AppModel {
             self?.rewriteOpenText(paths, context: context)
             self?.filesDidChange(structure: false, changed: result.written.map(\.path))
             if !result.failed.isEmpty {
-                self?.showFileProblem("Some links couldn’t be updated.", Self.list(result.failed, under: self?.rootURL?.path))
+                self?.showFileProblem(
+                    "Some links couldn’t be updated",
+                    "These documents couldn’t be changed:\n\n" + Self.list(result.failed, under: self?.rootURL?.path)
+                )
             }
         }
         undo?.registerUndo(withTarget: self) { model in
@@ -512,18 +529,26 @@ extension AppModel {
             let skipped = await runDetached { LinkUpdater.restore(files, forward: forward) }
             self?.filesDidChange(structure: false, changed: files.map(\.path))
             if !skipped.isEmpty {
-                self?.showFileProblem("Some files changed since the links were updated, so they were left as they are.",
-                                      Self.list(skipped, under: self?.rootURL?.path))
+                self?.showFileProblem(
+                    "Some links weren’t changed back",
+                    "These documents changed after the links were updated, so they were left as they are:\n\n"
+                        + Self.list(skipped, under: self?.rootURL?.path)
+                )
             }
         }
     }
 
     private static func list(_ paths: [String], under root: String?) -> String {
-        var lines = paths.prefix(8).map { path in
+        listing(paths.map { path in
             guard let root, path.hasPrefix(root + "/") else { return path }
             return String(path.dropFirst(root.count + 1))
-        }
-        if paths.count > 8 { lines.append("and \(paths.count - 8) more") }
+        })
+    }
+
+    /// One item per line, at most `limit` of them, then a line such as "and 3 more".
+    static func listing(_ items: [String], limit: Int = 8) -> String {
+        var lines = Array(items.prefix(limit))
+        if items.count > limit { lines.append("and \(items.count - limit) more") }
         return lines.joined(separator: "\n")
     }
 
