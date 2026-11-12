@@ -104,11 +104,13 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case bold, italic, strikethrough, inlineCode, link
     case formatTable
     case focusMode, typewriterScrolling
+    case commit
 
     var id: String { rawValue }
 
     enum Category: String, CaseIterable {
         case file = "File", navigate = "Navigate", find = "Find", view = "View", format = "Format"
+        case sourceControl = "Source Control"
     }
 
     var category: Category {
@@ -120,6 +122,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .bold, .italic, .strikethrough, .inlineCode, .link: .format
         case .formatTable: .format
         case .focusMode, .typewriterScrolling: .view
+        case .commit: .sourceControl
         }
     }
 
@@ -153,6 +156,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .formatTable: "Format Table"
         case .focusMode: "Focus Mode"
         case .typewriterScrolling: "Typewriter Scrolling"
+        case .commit: "Commit…"
         }
     }
 
@@ -186,6 +190,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .formatTable: "option+cmd+t"
         case .focusMode: "option+cmd+f"
         case .typewriterScrolling: ""
+        case .commit: "option+cmd+k"
         }
         return Shortcut(string: value)
     }

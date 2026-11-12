@@ -155,5 +155,10 @@ struct LexMDCommands: Commands {
             Divider()
             item(.formatTable) { model.editor.formatTable() }
         }
+        if model.showsGitCommands {
+            CommandMenu("Source Control") {
+                item(.commit, disabled: !model.canCommitCurrentDocument) { model.showCommitSheet() }
+            }
+        }
     }
 }

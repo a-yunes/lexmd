@@ -58,7 +58,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
     var isTypewriterScrollingEnabled = false {
         didSet { if isTypewriterScrollingEnabled != oldValue { typewriterSettingDidChange() } }
     }
-    var focusState = FocusState()
+    var focusState = EditorFocusState()
 
     var fontSize: CGFloat = 14 {
         didSet {

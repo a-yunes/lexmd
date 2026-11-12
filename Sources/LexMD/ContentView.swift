@@ -52,6 +52,7 @@ struct ContentView: View {
             model.open(url)
             return true
         }
+        .modifier(CommitSheetPresenter())
     }
 }
 
@@ -62,6 +63,11 @@ extension ContentView {
             DocumentTitle()
         }
         ToolbarSpacer(.flexible)
+        if model.showsCommitButton {
+            ToolbarItem(placement: .primaryAction) {
+                CommitToolbarButton()
+            }
+        }
         ToolbarItem(placement: .primaryAction) {
             ViewModePicker()
         }
@@ -253,6 +259,7 @@ struct FileRow: View {
                         Image(systemName: "folder")
                     }
                     Spacer(minLength: 0)
+                    GitBadgeView(path: node.id, isFolder: true)
                 }
                 .padding(.leading, indent)
                 .contentShape(Rectangle())
@@ -276,6 +283,7 @@ struct FileRow: View {
                     Image(systemName: "doc.text")
                 }
                 Spacer(minLength: 0)
+                GitBadgeView(path: node.id, isFolder: false)
             }
             .padding(.leading, indent)
             .tag(node.id)

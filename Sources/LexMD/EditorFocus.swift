@@ -1,7 +1,7 @@
 import AppKit
 
 /// Bookkeeping for focus mode and typewriter scrolling.
-struct FocusState {
+struct EditorFocusState {
     /// The paragraph left undimmed, or nil when nothing is dimmed.
     var paragraph: NSRange?
     /// Set when the text changes, since rendering attributes may not follow edits.
