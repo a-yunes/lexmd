@@ -7,10 +7,10 @@ import WebKit
 /// and fonts are served, so markup can display local media but never read other files.
 @MainActor
 final class DocumentSchemeHandler: NSObject, WKURLSchemeHandler {
-    static let scheme = "lexmd-doc"
+    nonisolated static let scheme = "lexmd-doc"
 
     /// Open-ended byte ranges are answered in chunks of at most this size.
-    private static let maxChunk: UInt64 = 8 << 20
+    private nonisolated static let maxChunk: UInt64 = 8 << 20
 
     /// The `lexmd-doc` URL for a local file or folder.
     static func url(for fileURL: URL) -> URL? {
@@ -26,30 +26,68 @@ final class DocumentSchemeHandler: NSObject, WKURLSchemeHandler {
         return URL(fileURLWithPath: url.path)
     }
 
+    /// Requests still being read. A stopped request is removed and never answered.
+    private var running: Set<ObjectIdentifier> = []
+
+    /// Files are read off the main thread: images can be large, and a file kept only in iCloud
+    /// is downloaded on first read.
     func webView(_ webView: WKWebView, start task: any WKURLSchemeTask) {
         guard let url = task.request.url, let file = Self.fileURL(for: url) else {
             return task.didFailWithError(URLError(.badURL))
         }
+        let range = task.request.value(forHTTPHeaderField: "Range")
+        let id = ObjectIdentifier(task)
+        running.insert(id)
+        Task { @MainActor in
+            let result = await runDetached { Self.read(file, range: range) }
+            // The task is kept alive until here, so its identifier cannot be reused meanwhile.
+            guard running.remove(id) != nil else { return }
+            switch result {
+            case .success(let payload):
+                guard let response = HTTPURLResponse(url: url, statusCode: payload.status, httpVersion: "HTTP/1.1", headerFields: payload.headers) else {
+                    return task.didFailWithError(URLError(.cannotParseResponse))
+                }
+                task.didReceive(response)
+                task.didReceive(payload.data)
+                task.didFinish()
+            case .failure(let error):
+                task.didFailWithError(error)
+            }
+        }
+    }
+
+    func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) {
+        running.remove(ObjectIdentifier(task))
+    }
+
+    struct Payload: Sendable {
+        var status: Int
+        var headers: [String: String]
+        var data: Data
+    }
+
+    /// Reads a servable file, or the part a `Range` header asks for.
+    nonisolated static func read(_ file: URL, range rangeHeader: String?) -> Result<Payload, any Error> {
         let path = FileScanner.canonicalPath(file.path)
         let values = try? URL(fileURLWithPath: path).resourceValues(forKeys: [.contentTypeKey, .isRegularFileKey, .fileSizeKey])
         guard values?.isRegularFile == true, let type = values?.contentType,
               [.image, .audiovisualContent, .font].contains(where: { type.conforms(to: $0) }),
               let handle = FileHandle(forReadingAtPath: path) else {
-            return task.didFailWithError(URLError(.fileDoesNotExist))
+            return .failure(URLError(.fileDoesNotExist))
         }
         defer { try? handle.close() }
 
         let size = UInt64(values?.fileSize ?? 0)
         var start: UInt64 = 0
         var end = size == 0 ? 0 : size - 1
-        let range = task.request.value(forHTTPHeaderField: "Range").flatMap { Self.byteRange($0, size: size) }
+        let range = rangeHeader.flatMap { byteRange($0, size: size) }
         if let range { (start, end) = range }
         let data: Data
         do {
             try handle.seek(toOffset: start)
             data = size == 0 ? Data() : try handle.read(upToCount: Int(end - start + 1)) ?? Data()
         } catch {
-            return task.didFailWithError(error)
+            return .failure(error)
         }
         var headers = [
             "Content-Type": type.preferredMIMEType ?? "application/octet-stream",
@@ -60,21 +98,11 @@ final class DocumentSchemeHandler: NSObject, WKURLSchemeHandler {
         if range != nil {
             headers["Content-Range"] = "bytes \(start)-\(start + UInt64(max(data.count, 1)) - 1)/\(size)"
         }
-        let status = range == nil ? 200 : 206
-        guard let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers) else {
-            return task.didFailWithError(URLError(.cannotParseResponse))
-        }
-        task.didReceive(response)
-        task.didReceive(data)
-        task.didFinish()
-    }
-
-    func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) {
-        // Responses are delivered synchronously in `start`, so there is nothing to cancel.
+        return .success(Payload(status: range == nil ? 200 : 206, headers: headers, data: data))
     }
 
     /// Parses a single `bytes=` range into inclusive offsets clamped to the file.
-    static func byteRange(_ header: String, size: UInt64) -> (UInt64, UInt64)? {
+    nonisolated static func byteRange(_ header: String, size: UInt64) -> (UInt64, UInt64)? {
         guard size > 0, header.hasPrefix("bytes="), !header.contains(",") else { return nil }
         let parts = header.dropFirst(6).split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
         guard parts.count == 2 else { return nil }
