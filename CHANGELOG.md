@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- Mermaid diagrams render with Pele and math renders with KaTeX (`$inline$`, `$$display$$`,
+  `math` blocks), both following light and dark. Footnotes get links and back-links, and simple
+  front matter shows as a properties table.
+- Outline panel (⌥⌘O) with the headings of the document, the documents that link to it, and any
+  broken links. Wiki links (`[[Name]]`, `[[Name|label]]`, `[[Name#Heading]]`) open the matching
+  document, and the editor suggests files, images and headings while you type a link.
+- Tabs: Command-click a file, choose Open in New Tab, or press ⌘↩ in Open Quickly. Open tabs
+  return when the project opens again.
+- Create, rename, duplicate, move and trash files and folders in the sidebar. Renaming or moving
+  a document offers to update every link to it, and the change can be undone.
+- Export as PDF (⇧⌘E) or HTML, Print (⌥⌘P), and Copy as Rich Text (⌥⌘C), with diagrams and math
+  included.
+- Paste or drop images to save them next to the document and link them. Pasting a URL over
+  selected text makes a link, and spreadsheet tables become Markdown tables. Tab moves between
+  table cells and keeps columns aligned.
+- Focus Mode (⌥⌘F), Typewriter Scrolling, and spelling and grammar settings that skip code and links.
+- In Git repositories, the sidebar marks changed files and Commit… (⌥⌘K) shows the branch, the
+  author the commit will use, the changed files with diffs, and a message field. It commits only
+  the files you pick and never contacts a remote. Git features stay hidden outside repositories.
+- Quick Look previews of Markdown files in Finder, a `lexmd` command (LexMD > Install Command
+  Line Tool…), and Shortcuts actions: Open in LexMD, Create Note, and Get Current Document.
+
 ## 1.0.0
 
 First public release.

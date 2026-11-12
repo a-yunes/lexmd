@@ -13,6 +13,13 @@ No account, subscription, or analytics. Your files stay where they are.
 - Read in a clean native preview with GitHub-style alerts, tables, task lists, and code highlighting.
   Documents never run scripts, and images hosted online load only if you allow them.
 - Update in place: switch to the editor or keep it side by side. Changes save as you type.
+- Diagrams (Mermaid syntax, rendered by Pele), math, footnotes, and front matter as properties.
+- Outline, backlinks, wiki links, link suggestions, and broken-link checks.
+- Tabs, plus creating, renaming, and moving files with links updated for you.
+- Export to PDF or HTML, print, or copy as rich text.
+- Paste images, paste tables from spreadsheets, Focus Mode, and Typewriter Scrolling.
+- In Git repositories, see changed files and commit them, with the author shown before you commit.
+- Quick Look previews in Finder, a `lexmd` command, and Shortcuts actions.
 - Find in a document with ⌘F, across the whole project with ⇧⌘F, or jump to any file with ⌘P.
 - Follows the system appearance, or choose Light or Dark. Every shortcut can be remapped.
 - Signed, optional automatic updates.
