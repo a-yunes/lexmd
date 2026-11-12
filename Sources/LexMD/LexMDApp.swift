@@ -103,6 +103,13 @@ struct LexMDCommands: Commands {
         CommandGroup(after: .pasteboard) {
             item(.copyRichText, disabled: !model.canExport) { model.copyRichText() }
             Divider()
+            Menu("Spelling and Grammar") {
+                Button("Show Spelling and Grammar") { NSApp.sendAction(#selector(NSText.showGuessPanel(_:)), to: nil, from: nil) }
+                Button("Check Document Now") { NSApp.sendAction(#selector(NSText.checkSpelling(_:)), to: nil, from: nil) }
+                Divider()
+                Toggle("Check Spelling While Typing", isOn: Binding(get: { model.checksSpelling }, set: { model.checksSpelling = $0 }))
+                Toggle("Check Grammar With Spelling", isOn: Binding(get: { model.checksGrammar }, set: { model.checksGrammar = $0 }))
+            }
             Menu("Find") {
                 item(.find) { model.showFind() }
                 item(.findNext) { model.findNext(true) }
@@ -141,6 +148,13 @@ struct LexMDCommands: Commands {
             item(.split) { model.setViewMode(.split) }
             item(.editorOnly) { model.setViewMode(.edit) }
             Divider()
+            Toggle(ShortcutAction.focusMode.title, isOn: Binding(get: { model.focusMode }, set: { model.focusMode = $0 }))
+                .keyboardShortcut(model.keyboardShortcut(.focusMode))
+            Toggle(ShortcutAction.typewriterScrolling.title, isOn: Binding(
+                get: { model.typewriterScrolling }, set: { model.typewriterScrolling = $0 }
+            ))
+            .keyboardShortcut(model.keyboardShortcut(.typewriterScrolling))
+            Divider()
             Toggle("Compact Single-Item Folders", isOn: Binding(
                 get: { model.compactFolders },
                 set: { model.compactFolders = $0 }
@@ -151,15 +165,6 @@ struct LexMDCommands: Commands {
             item(.zoomIn) { model.zoom(by: 1) }
             item(.zoomOut) { model.zoom(by: -1) }
             item(.zoomReset) { model.zoom(by: 0) }
-            Divider()
-        }
-        CommandGroup(before: .sidebar) {
-            Toggle(ShortcutAction.focusMode.title, isOn: Binding(get: { model.focusMode }, set: { model.focusMode = $0 }))
-                .keyboardShortcut(model.keyboardShortcut(.focusMode))
-            Toggle(ShortcutAction.typewriterScrolling.title, isOn: Binding(
-                get: { model.typewriterScrolling }, set: { model.typewriterScrolling = $0 }
-            ))
-            .keyboardShortcut(model.keyboardShortcut(.typewriterScrolling))
             Divider()
         }
         CommandMenu("Go") {

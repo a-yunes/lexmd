@@ -256,9 +256,9 @@ struct CommitSheet: View {
             Divider()
             HSplitView {
                 fileList
-                    .frame(minWidth: 220, idealWidth: 290, maxWidth: 420)
+                    .frame(minWidth: 220, idealWidth: 290, maxWidth: 420, maxHeight: .infinity, alignment: .top)
                 diffPane
-                    .frame(minWidth: 320, maxWidth: .infinity)
+                    .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .frame(maxHeight: .infinity)
             Divider()
@@ -384,6 +384,7 @@ struct CommitSheet: View {
                 }
             }
             .listStyle(.inset)
+            .frame(maxHeight: .infinity)
             .overlay {
                 if !session.isLoading, session.changes.isEmpty {
                     ContentUnavailableView(

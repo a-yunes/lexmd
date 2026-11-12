@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 import WebKit
 
 @MainActor
@@ -17,6 +18,7 @@ final class PreviewController: NSObject, WKNavigationDelegate {
 
     /// LexMD's preview script runs here, apart from the page world that holds document markup.
     private static let world = WKContentWorld.world(name: "LexMD")
+    private static let log = Logger(subsystem: "io.github.a-yunes.lexmd", category: "preview")
     private static let pageURL = URL(string: "\(DocumentSchemeHandler.scheme):///")!
     /// Pele draws diagrams and KaTeX typesets math; each is loaded when markup first needs it.
     private static let libraries = [("class=\"lexmd-diagram\"", VendorAssets.peleScript), ("class=\"lexmd-math", VendorAssets.katexScript)]
@@ -183,7 +185,11 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     /// Runs a call into the preview script in LexMD's content world.
     private func call(_ body: String, _ arguments: [String: Any], completion: ((Any?) -> Void)? = nil) {
         webView.callAsyncJavaScript(body, arguments: arguments, in: nil, in: Self.world) { result in
-            if let completion, case .success(let value) = result { completion(value) }
+            switch result {
+            case .success(let value): completion?(value)
+            case .failure(let error):
+                Self.log.error("Preview call failed: \(body.prefix(40), privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 
