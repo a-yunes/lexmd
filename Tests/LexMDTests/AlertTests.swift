@@ -20,7 +20,8 @@ struct AlertTests {
     @Test func destructiveAlertsAreMarkedAndCancelWithEscape() {
         let trash = AppModel.trashConfirmation(name: "notes.md", isFolder: false)
         #expect(trash.buttons.map(\.title) == ["Move to Trash", "Cancel"])
-        checkConventions(trash, destructive: ["Move to Trash"], escape: "Cancel")
+        checkConventions(trash, destructive: [], escape: "Cancel")
+        #expect(trash.buttons.first?.keyEquivalent == "\r", "Return confirms an undoable Move to Trash")
 
         let discard = AppModel.discardConfirmation("notes")
         #expect(discard.buttons.map(\.title) == ["Discard Changes", "Cancel"])

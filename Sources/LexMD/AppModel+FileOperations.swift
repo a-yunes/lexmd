@@ -318,7 +318,8 @@ extension AppModel {
         alert.informativeText = isFolder
             ? "The folder and everything in it move to the Trash. You can put them back from there."
             : "You can put it back from the Trash."
-        alert.addDestructiveButton("Move to Trash")
+        // Undoable and chosen on purpose, so a regular default button rather than the destructive style.
+        alert.makeDefault(alert.addButton(withTitle: "Move to Trash"))
         alert.addCancelButton()
         return alert
     }
