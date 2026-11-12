@@ -43,6 +43,7 @@ private struct GeneralSettings: View {
                     Text("A folder that holds just one item is merged into it, so a lone README.md inside “guides” shows as one row: guides › README.")
                 }
             }
+            EditorSettingsSection()
             Section("Preview") {
                 Toggle(isOn: $model.loadsRemoteContent) {
                     Text("Load images from the web")
