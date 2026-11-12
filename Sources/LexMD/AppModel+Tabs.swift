@@ -198,13 +198,15 @@ extension AppModel {
         if let key = NSApp.keyWindow, key.sheetParent != nil || (key === mainWindow && key.attachedSheet != nil) {
             // A sheet (such as Commit) is in front; it closes with its own buttons.
             NSSound.beep()
-        } else if let key = NSApp.keyWindow, key !== mainWindow {
+        } else if let key = NSApp.keyWindow, let mainWindow, key !== mainWindow {
             key.performClose(nil)
         } else if currentFile != nil, let id = tabStore.list.activeID {
             closeTab(id)
-        } else {
-            (NSApp.keyWindow ?? mainWindow)?.performClose(nil)
+        } else if let window = NSApp.keyWindow ?? mainWindow, Self.otherWindowsRemainOpen(besides: window, in: NSApp.windows) {
+            window.performClose(nil)
         }
+        // Otherwise the window is the last one, and closing it would quit LexMD; Close Window
+        // remains for that.
     }
 
     func closeTab(_ id: UUID) {

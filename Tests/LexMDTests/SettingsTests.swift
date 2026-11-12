@@ -21,8 +21,8 @@ struct ShortcutGroupingTests {
             ShortcutAction.allCases.filter { $0.category == category }
         }
         #expect(listed(.file) == [
-            .newDocument, .newFolder, .open, .quickOpen, .newTab, .closeTab, .reopenClosedTab, .save,
-            .revealInFinder, .renameItem, .duplicateItem, .moveToTrash, .exportPDF, .exportHTML, .printDocument,
+            .newDocument, .newFolder, .newTab, .open, .quickOpen, .closeWindow, .closeTab, .reopenClosedTab, .save,
+            .revealInFinder, .renameItem, .duplicateItem, .moveTo, .moveToTrash, .exportPDF, .exportHTML, .printDocument,
         ])
         #expect(listed(.edit) == [.copyRichText, .find, .findNext, .findPrevious, .findInFiles])
         #expect(listed(.view) == [
@@ -39,8 +39,8 @@ struct ShortcutGroupingTests {
             "toggleSidebar", "previewOnly", "split", "editorOnly", "expandAll", "collapseAll", "zoomIn", "zoomOut", "zoomReset",
             "find", "findNext", "findPrevious", "findInFiles", "goBack", "goForward",
             "bold", "italic", "strikethrough", "inlineCode", "link",
-            "newFolder", "renameItem", "duplicateItem", "moveToTrash",
-            "closeTab", "reopenClosedTab", "showNextTab", "showPreviousTab", "newTab",
+            "newFolder", "renameItem", "duplicateItem", "moveTo", "moveToTrash",
+            "closeTab", "closeWindow", "reopenClosedTab", "showNextTab", "showPreviousTab", "newTab",
             "formatTable", "focusMode", "typewriterScrolling", "commit",
             "exportPDF", "exportHTML", "printDocument", "copyRichText", "toggleOutline",
             "installCommandLineTool", "renameInSidebar", "trashInSidebar",

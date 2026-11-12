@@ -11,6 +11,9 @@ enum CommandLineTool {
         return path
     }
 
+    /// Whether this copy of LexMD contains the tool. The install command is shown only then.
+    static let isBundled = bundledTool != nil
+
     enum LinkState: Equatable {
         case missing
         /// A link to this tool.
