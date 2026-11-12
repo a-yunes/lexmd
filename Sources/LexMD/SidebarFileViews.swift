@@ -30,6 +30,7 @@ struct FileActionMenuItems: View {
         let isFolder = url.hasDirectoryPath
         if !isFolder {
             Button("Open in New Tab") { model.openInNewTab(url.path) }
+                .disabled(url.path == model.currentFile?.path)
             Divider()
         }
         Button("New File") { model.newFile(near: url) }
