@@ -2,7 +2,7 @@ import AppKit
 import WebKit
 
 @MainActor
-final class PreviewController: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+final class PreviewController: NSObject, WKNavigationDelegate {
     let webView: WKWebView
     var onOpenURL: ((URL) -> Void)?
     var onHighlightCount: ((Int) -> Void)?
@@ -13,32 +13,39 @@ final class PreviewController: NSObject, WKNavigationDelegate, WKScriptMessageHa
         var current: Int
     }
 
+    /// LexMD's preview script runs here, apart from the page world that holds document markup.
+    private static let world = WKContentWorld.world(name: "LexMD")
+    private static let pageURL = URL(string: "\(DocumentSchemeHandler.scheme):///")!
+
     private var highlight: Highlight?
     private var highlightApplied = false
     private var highlightScrollUntil = Date.distantPast
 
     private var isLoaded = false
+    private var isLoadingTemplate = false
     private var lastHTML = ""
     private var lastBase: URL?
     private var pendingReset = false
     private var scale: Double = 1
-    private let templateURL: URL
+    private(set) var allowsRemoteContent: Bool
 
-    override init() {
+    init(allowsRemoteContent: Bool) {
+        self.allowsRemoteContent = allowsRemoteContent
         let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.setURLSchemeHandler(DocumentSchemeHandler(), forURLScheme: DocumentSchemeHandler.scheme)
+        // Scripts in documents never run; LexMD's own script below is unaffected.
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         let content = WKUserContentController()
+        content.addUserScript(WKUserScript(
+            source: PreviewTemplate.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Self.world
+        ))
         configuration.userContentController = content
-        configuration.suppressesIncrementalRendering = false
         webView = WKWebView(frame: .zero, configuration: configuration)
 
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "LexMD", isDirectory: true)
-        try? FileManager.default.createDirectory(at: caches, withIntermediateDirectories: true)
-        templateURL = caches.appendingPathComponent("preview.html")
-        try? PreviewTemplate.html.write(to: templateURL, atomically: true, encoding: .utf8)
-
         super.init()
-        content.add(self, name: "lexmd")
+        // The content controller keeps its handlers alive, so it gets a proxy that holds this controller weakly.
+        content.add(ScriptMessageProxy(self), contentWorld: Self.world, name: "lexmd")
         webView.navigationDelegate = self
         webView.setValue(false, forKey: "drawsBackground")
         webView.allowsMagnification = false
@@ -48,7 +55,15 @@ final class PreviewController: NSObject, WKNavigationDelegate, WKScriptMessageHa
 
     private func loadTemplate() {
         isLoaded = false
-        webView.loadFileURL(templateURL, allowingReadAccessTo: URL(fileURLWithPath: "/"))
+        isLoadingTemplate = true
+        webView.loadHTMLString(PreviewTemplate.html(allowsRemoteContent: allowsRemoteContent), baseURL: Self.pageURL)
+    }
+
+    /// Lets documents load images and media from the web. The page reloads to apply it.
+    func setAllowsRemoteContent(_ value: Bool) {
+        guard value != allowsRemoteContent else { return }
+        allowsRemoteContent = value
+        loadTemplate()
     }
 
     func render(html: String, baseURL: URL?, resetScroll: Bool) {
@@ -61,14 +76,10 @@ final class PreviewController: NSObject, WKNavigationDelegate, WKScriptMessageHa
     }
 
     private func flush() {
-        let b64 = Data(lastHTML.utf8).base64EncodedString()
-        var base = lastBase?.absoluteString ?? ""
-        if !base.isEmpty, !base.hasSuffix("/") { base += "/" }
-        let args: [Any] = [b64, base, pendingReset]
+        let base = lastBase.flatMap { DocumentSchemeHandler.url(for: $0)?.absoluteString } ?? ""
+        let reset = pendingReset
         pendingReset = false
-        guard let data = try? JSONSerialization.data(withJSONObject: args),
-              let json = String(data: data, encoding: .utf8) else { return }
-        webView.evaluateJavaScript("lexmdRender.apply(null, \(json))", completionHandler: nil)
+        call("lexmdRender(html, base, reset)", ["html": lastHTML, "base": base, "reset": reset])
         if highlight != nil || highlightApplied {
             applyHighlight(scroll: Date() < highlightScrollUntil)
             highlightScrollUntil = .distantPast
@@ -87,34 +98,46 @@ final class PreviewController: NSObject, WKNavigationDelegate, WKScriptMessageHa
     private func applyHighlight(scroll: Bool) {
         let h = highlight
         highlightApplied = h != nil
-        let args: [Any] = [
-            h?.query ?? "", h?.options.caseSensitive ?? false, h?.options.wholeWord ?? false,
-            h?.options.regex ?? false, h?.current ?? -1, scroll,
+        let args: [String: Any] = [
+            "q": h?.query ?? "", "cs": h?.options.caseSensitive ?? false, "word": h?.options.wholeWord ?? false,
+            "regex": h?.options.regex ?? false, "current": h?.current ?? -1, "scroll": scroll,
         ]
-        guard let data = try? JSONSerialization.data(withJSONObject: args),
-              let json = String(data: data, encoding: .utf8) else { return }
-        webView.evaluateJavaScript("lexmdFind.apply(null, \(json))") { [weak self] result, _ in
-            let count = (result as? NSNumber)?.intValue ?? 0
-            MainActor.assumeIsolated { self?.onHighlightCount?(count) }
+        call("return lexmdFind(q, cs, word, regex, current, scroll)", args) { [weak self] result in
+            self?.onHighlightCount?((result as? NSNumber)?.intValue ?? 0)
         }
     }
 
     func scroll(to fraction: CGFloat) {
         guard isLoaded else { return }
-        webView.evaluateJavaScript("lexmdScroll(\(Double(fraction)))", completionHandler: nil)
+        call("lexmdScroll(f)", ["f": Double(fraction)])
     }
 
     func setScale(_ value: Double) {
         scale = value
         guard isLoaded else { return }
-        webView.evaluateJavaScript("lexmdZoom(\(value))", completionHandler: nil)
+        call("lexmdZoom(s)", ["s": value])
+    }
+
+    /// Runs a call into the preview script in LexMD's content world.
+    private func call(_ body: String, _ arguments: [String: Any], completion: ((Any?) -> Void)? = nil) {
+        webView.callAsyncJavaScript(body, arguments: arguments, in: nil, in: Self.world) { result in
+            if let completion, case .success(let value) = result { completion(value) }
+        }
+    }
+
+    fileprivate func receive(_ message: WKScriptMessage) {
+        guard let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
+        if type == "copy", let text = body["text"] as? String {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
     }
 
     // MARK: WKNavigationDelegate
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         isLoaded = true
-        webView.evaluateJavaScript("lexmdZoom(\(scale))", completionHandler: nil)
+        call("lexmdZoom(s)", ["s": scale])
         pendingReset = true
         flush()
     }
@@ -125,25 +148,32 @@ final class PreviewController: NSObject, WKNavigationDelegate, WKScriptMessageHa
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
         guard let url = navigationAction.request.url else { return .cancel }
-        if navigationAction.targetFrame?.isMainFrame == false { return .allow }
-        if url.isFileURL, url.standardizedFileURL.path == templateURL.standardizedFileURL.path,
-           navigationAction.navigationType != .linkActivated {
+        let frame = navigationAction.targetFrame
+        if isLoadingTemplate, frame?.isMainFrame == true, url == Self.pageURL {
+            isLoadingTemplate = false
             return .allow
         }
-        // Link clicks, new-window links, and files dropped onto the preview.
-        if navigationAction.navigationType == .linkActivated || navigationAction.targetFrame == nil || url.isFileURL {
+        if navigationAction.navigationType == .linkActivated {
+            // A click on a link, including one that asks for a new window.
+            if frame?.isMainFrame != false { onOpenURL?(DocumentSchemeHandler.fileURL(for: url) ?? url) }
+        } else if frame?.isMainFrame == true, url.isFileURL, FileScanner.isMarkdown(path: url.path) {
+            // A Markdown file dropped onto the preview. Nothing else may navigate without a click.
             onOpenURL?(url)
         }
         return .cancel
     }
+}
 
-    // MARK: WKScriptMessageHandler
+/// Forwards script messages to the preview without the content controller retaining it.
+@MainActor
+private final class ScriptMessageProxy: NSObject, WKScriptMessageHandler {
+    private weak var target: PreviewController?
+
+    init(_ target: PreviewController) {
+        self.target = target
+    }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
-        if type == "copy", let text = body["text"] as? String {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
-        }
+        target?.receive(message)
     }
 }

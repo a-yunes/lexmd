@@ -43,6 +43,12 @@ private struct GeneralSettings: View {
                     Text("A folder that holds just one item is merged into it, so a lone README.md inside “guides” shows as one row: guides › README.")
                 }
             }
+            Section("Preview") {
+                Toggle(isOn: $model.loadsRemoteContent) {
+                    Text("Load images from the web")
+                    Text("Images and videos hosted online load from their servers, which can see when you open a document. Local images always show.")
+                }
+            }
         }
         .formStyle(.grouped)
         .fixedSize(horizontal: false, vertical: true)

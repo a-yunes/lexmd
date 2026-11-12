@@ -12,14 +12,14 @@ enum MarkdownHighlighter {
         return font
     }
 
-    static func paragraphStyle(size: CGFloat) -> NSParagraphStyle {
+    private static let paragraphStyle: NSParagraphStyle = {
         let style = NSMutableParagraphStyle()
         style.lineHeightMultiple = 1.28
         return style
-    }
+    }()
 
     static func baseAttributes(size: CGFloat) -> [NSAttributedString.Key: Any] {
-        [.font: font(size: size), .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraphStyle(size: size)]
+        [.font: font(size: size), .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraphStyle]
     }
 
     private static func dynamic(light: NSColor, dark: NSColor) -> NSColor {
@@ -56,11 +56,49 @@ enum MarkdownHighlighter {
     private static let tablePipe = re(#"^[ \t]*\|.*$"#)
     private static let pipe = re(#"\|"#, [])
 
-    static func highlight(_ storage: NSTextStorage, size: CGFloat, in limit: NSRange? = nil) {
+    /// Finds the multi-line constructs (front matter, fenced code, comments) over the whole text.
+    static func blocks(in string: String) -> MarkdownBlocks {
+        let ns = string as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        var blocks = MarkdownBlocks()
+        var covered = IndexSet()
+        func add(_ r: NSRange, _ kind: MarkdownBlocks.Kind) {
+            let head = ns.lineRange(for: NSRange(location: r.location, length: 0))
+            let tail = ns.lineRange(for: NSRange(location: max(r.location, NSMaxRange(r) - 1), length: 0))
+            var closed = false
+            if kind == .fence, r.length > head.length {
+                let line = ns.substring(with: tail).trimmingCharacters(in: .whitespacesAndNewlines)
+                closed = line.hasPrefix("```") || line.hasPrefix("~~~")
+            }
+            blocks.items.append(.init(kind: kind, range: r, head: head, tail: tail, closed: closed))
+            covered.insert(integersIn: r.location..<NSMaxRange(r))
+        }
+        func isCovered(_ r: NSRange) -> Bool {
+            r.length > 0 && covered.intersects(integersIn: r.location..<NSMaxRange(r))
+        }
+        frontMatter.enumerateMatches(in: string, range: full) { m, _, _ in
+            if let r = m?.range, r.length > 0 { add(r, .frontMatter) }
+        }
+        fence.enumerateMatches(in: string, range: full) { m, _, _ in
+            if let r = m?.range, r.length > 0, !isCovered(r) { add(r, .fence) }
+        }
+        comment.enumerateMatches(in: string, range: full) { m, _, _ in
+            if let r = m?.range, r.length > 0, !isCovered(r) { add(r, .comment) }
+        }
+        return blocks
+    }
+
+    /// Styles `limit` (or the whole text). Pass `blocks` from an earlier call, kept current with
+    /// `MarkdownBlocks.shift`, to skip rescanning the whole text for multi-line constructs.
+    @discardableResult
+    static func highlight(
+        _ storage: NSTextStorage, size: CGFloat, in limit: NSRange? = nil, blocks known: MarkdownBlocks? = nil
+    ) -> MarkdownBlocks {
         let string = storage.string
         let full = NSRange(location: 0, length: storage.length)
-        let range = limit ?? full
-        guard full.length > 0 else { return }
+        let range = limit.map { NSIntersectionRange($0, full) } ?? full
+        let blocks = known ?? Self.blocks(in: string)
+        guard full.length > 0 else { return blocks }
 
         storage.beginEditing()
         defer { storage.endEditing() }
@@ -75,34 +113,20 @@ enum MarkdownHighlighter {
             storage.addAttribute(.foregroundColor, value: c, range: r)
         }
 
-        // Block-level ranges are found over the whole text so partial highlights stay correct.
-        frontMatter.enumerateMatches(in: string, range: full) { m, _, _ in
-            guard let r = m?.range, NSIntersectionRange(r, range).length > 0 else { return }
-            let clipped = NSIntersectionRange(r, range)
-            color(clipped, .secondaryLabelColor)
-            protected.insert(integersIn: r.location..<NSMaxRange(r))
-        }
-        fence.enumerateMatches(in: string, range: full) { m, _, _ in
-            guard let r = m?.range, !isProtected(r) else { return }
-            protected.insert(integersIn: r.location..<NSMaxRange(r))
-            let clipped = NSIntersectionRange(r, range)
-            guard clipped.length > 0 else { return }
-            color(clipped, codeColor)
-            let ns = string as NSString
-            let first = ns.lineRange(for: NSRange(location: r.location, length: 0))
-            color(NSIntersectionRange(first, range), markerColor)
-            if r.length > first.length {
-                let last = ns.lineRange(for: NSRange(location: max(r.location, NSMaxRange(r) - 1), length: 0))
-                let fenceLine = ns.substring(with: last).trimmingCharacters(in: .whitespacesAndNewlines)
-                if fenceLine.hasPrefix("```") || fenceLine.hasPrefix("~~~") {
-                    color(NSIntersectionRange(last, range), markerColor)
-                }
+        for block in blocks.items {
+            protected.insert(integersIn: block.range.location..<NSMaxRange(block.range))
+            let clipped = NSIntersectionRange(block.range, range)
+            guard clipped.length > 0 else { continue }
+            switch block.kind {
+            case .frontMatter:
+                color(clipped, .secondaryLabelColor)
+            case .comment:
+                color(clipped, markerColor)
+            case .fence:
+                color(clipped, codeColor)
+                color(NSIntersectionRange(block.head, range), markerColor)
+                if block.closed { color(NSIntersectionRange(block.tail, range), markerColor) }
             }
-        }
-        comment.enumerateMatches(in: string, range: range) { m, _, _ in
-            guard let r = m?.range, !isProtected(r) else { return }
-            color(r, markerColor)
-            protected.insert(integersIn: r.location..<NSMaxRange(r))
         }
 
         func each(_ regex: NSRegularExpression, _ body: (NSTextCheckingResult) -> Void) {
@@ -187,6 +211,50 @@ enum MarkdownHighlighter {
         each(reference) { m in
             color(m.range(at: 1), .linkColor)
             color(m.range(at: 2), markerColor)
+        }
+        return blocks
+    }
+}
+
+/// Front matter, fenced code, and comments in the editor text, with their opening and closing lines.
+struct MarkdownBlocks {
+    enum Kind { case frontMatter, fence, comment }
+
+    struct Item {
+        let kind: Kind
+        var range: NSRange
+        var head: NSRange
+        var tail: NSRange
+        let closed: Bool
+    }
+
+    var items: [Item] = []
+
+    /// Lines whose edits can open, close, or move a block, so the whole text must be rescanned.
+    private static let delimiters = ["```", "~~~", "<!--", "-->", "---"]
+
+    static func linesHaveDelimiter(_ text: String) -> Bool {
+        delimiters.contains { text.contains($0) }
+    }
+
+    /// Whether an edit of `old` (in pre-edit offsets) touches a block's opening or closing line.
+    func touchesBoundary(_ old: NSRange) -> Bool {
+        func touches(_ a: NSRange) -> Bool { old.location <= NSMaxRange(a) && a.location <= NSMaxRange(old) }
+        return items.contains { touches($0.head) || touches($0.tail) }
+    }
+
+    /// Updates offsets after `old` was replaced by text `delta` characters longer.
+    mutating func shift(replacing old: NSRange, delta: Int) {
+        for i in items.indices {
+            if items[i].range.location >= NSMaxRange(old) {
+                items[i].range.location += delta
+                items[i].head.location += delta
+                items[i].tail.location += delta
+            } else if NSMaxRange(items[i].range) > old.location {
+                // The edit is inside the block, between its opening and closing lines.
+                items[i].range.length += delta
+                items[i].tail.location += delta
+            }
         }
     }
 }

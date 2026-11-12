@@ -1,9 +1,17 @@
+/// The preview page and its script. Documents render into the page world, where the
+/// Content-Security-Policy and disabled content JavaScript stop any script they contain.
+/// The script below runs in LexMD's own content world, out of reach of document markup.
 enum PreviewTemplate {
-    static let html = #"""
+    static func html(allowsRemoteContent: Bool) -> String {
+        page.replacingOccurrences(of: "REMOTE", with: allowsRemoteContent ? " https:" : "")
+    }
+
+    private static let page = #"""
 <!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src lexmd-doc: data:REMOTE; media-src lexmd-doc: data:REMOTE; font-src lexmd-doc: data:; base-uri lexmd-doc:; form-action 'none'">
 <meta name="color-scheme" content="light dark">
 <base id="lexmd-base" href="">
 <style>
@@ -253,18 +261,15 @@ mark.lexmd-hit.current {
 </head>
 <body>
 <article id="content"></article>
-<script>
+</body>
+</html>
+"""#
+
+    static let script = #"""
 (function () {
   var content = document.getElementById('content');
   var base = document.getElementById('lexmd-base');
   var currentBase = '';
-
-  function decode(b64) {
-    var bin = atob(b64);
-    var bytes = new Uint8Array(bin.length);
-    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return new TextDecoder().decode(bytes);
-  }
 
   function sourceOf(node) {
     return node.nodeType === 1 ? node.outerHTML : node.textContent;
@@ -277,8 +282,7 @@ mark.lexmd-hit.current {
   }
 
   // Patch only the top-level blocks that changed so images and scroll position stay put.
-  window.lexmdRender = function (b64, baseHref, reset) {
-    var html = decode(b64);
+  window.lexmdRender = function (html, baseHref, reset) {
     if (baseHref !== currentBase) {
       base.setAttribute('href', baseHref);
       currentBase = baseHref;
@@ -475,8 +479,5 @@ mark.lexmd-hit.current {
     code.innerHTML = out;
   }
 })();
-</script>
-</body>
-</html>
 """#
 }

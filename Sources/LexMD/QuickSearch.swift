@@ -48,7 +48,6 @@ struct QuickSearchResults: Sendable {
     var hitCounts: [String: Int] = [:]
     var truncated = false
     var error: String?
-    var texts: [String: String] = [:]
 
     var hitFileCount: Int { hitCounts.count }
 }
@@ -116,9 +115,8 @@ enum QuickSearchEngine {
         var nextID = 0
         for file in ordered {
             if Task.isCancelled { break }
+            if results.hits.count >= maxHits { results.truncated = true; break }
             guard let text = overrides[file.path] ?? read(file.path) else { continue }
-            results.texts[file.path] = text
-            if results.hits.count >= maxHits { results.truncated = true; continue }
 
             let found = matches(of: regex, in: text)
             guard !found.isEmpty else { continue }
@@ -153,10 +151,9 @@ enum QuickSearchEngine {
         return results
     }
 
+    /// A file's text, reused from the cache while the file is unchanged.
     static func read(_ path: String) -> String? {
-        let url = URL(fileURLWithPath: path)
-        if let s = try? String(contentsOf: url, encoding: .utf8) { return s }
-        return try? String(contentsOf: url, encoding: .isoLatin1)
+        TextCache.shared.text(at: path)
     }
 
     static func lineStarts(_ text: String) -> [Int] {
@@ -285,5 +282,46 @@ enum QuickSearchEngine {
         }
         let score = best2[m - 1][end] - n / 12
         return score >= m * 4 ? (score, indices) : nil
+    }
+}
+
+/// File contents keyed by path and modification date, so repeated searches skip unchanged
+/// files. The cache is size-limited and the system may evict it under memory pressure.
+final class TextCache: @unchecked Sendable {
+    static let shared = TextCache()
+
+    private final class Entry {
+        let modified: Date
+        let text: String
+
+        init(modified: Date, text: String) {
+            self.modified = modified
+            self.text = text
+        }
+    }
+
+    private let cache = NSCache<NSString, Entry>()
+
+    private init() {
+        cache.totalCostLimit = 48 << 20
+    }
+
+    func text(at path: String) -> String? {
+        let key = path as NSString
+        let modified = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+        if let modified, let entry = cache.object(forKey: key), entry.modified == modified {
+            return entry.text
+        }
+        guard let text = Self.decode(path) else { return nil }
+        if let modified {
+            cache.setObject(Entry(modified: modified, text: text), forKey: key, cost: text.utf8.count)
+        }
+        return text
+    }
+
+    private static func decode(_ path: String) -> String? {
+        let url = URL(fileURLWithPath: path)
+        if let s = try? String(contentsOf: url, encoding: .utf8) { return s }
+        return try? String(contentsOf: url, encoding: .isoLatin1)
     }
 }

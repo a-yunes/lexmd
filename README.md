@@ -11,6 +11,7 @@ No account, subscription, or analytics. Your files stay where they are.
 - Open a repository to see all of its Markdown in one tree. Other files and folders without
   Markdown are hidden, and folders holding a single file are compacted.
 - Read in a clean native preview with GitHub-style alerts, tables, task lists, and code highlighting.
+  Documents never run scripts, and images hosted online load only if you allow them.
 - Update in place: switch to the editor or keep it side by side. Changes save as you type.
 - Find in a document with ⌘F, across the whole project with ⇧⌘F, or jump to any file with ⌘P.
 - Follows the system appearance, or choose Light or Dark. Every shortcut can be remapped.
@@ -37,6 +38,7 @@ open build/LexMD.app
 ```
 
 Pass `--install` to copy the build to `/Applications`. Builds are ad-hoc signed.
+Run the tests with `swift test`.
 
 ## Contribute
 

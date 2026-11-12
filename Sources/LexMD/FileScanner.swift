@@ -1,5 +1,6 @@
 import CoreServices
 import Foundation
+import UniformTypeIdentifiers
 
 struct FileNode: Identifiable, Hashable, Sendable {
     let url: URL
@@ -41,6 +42,16 @@ enum FileScanner {
         extensionSet.contains((path as NSString).pathExtension.lowercased())
     }
 
+    /// Documents that open in a viewer without running code: images, media, PDFs, and plain text.
+    /// Apps, scripts, executables, folders, and unknown types are excluded.
+    static func opensWithoutRunningCode(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.contentTypeKey, .isRegularFileKey, .isExecutableKey]),
+              values.isRegularFile == true, values.isExecutable != true, let type = values.contentType,
+              !type.conforms(to: .script), !type.conforms(to: .executable) else { return false }
+        let safe: [UTType] = [.image, .audiovisualContent, .pdf, .plainText, .rtf, .json, .commaSeparatedText]
+        return safe.contains { type.conforms(to: $0) }
+    }
+
     static func isIgnored(_ path: String, root: String) -> Bool {
         guard path.hasPrefix(root) else { return true }
         let relative = path.dropFirst(root.count)
@@ -57,7 +68,7 @@ enum FileScanner {
     }
 
     private static func scanDirectory(_ dir: URL, depth: Int, budget: inout Int, home: String) -> [FileNode] {
-        guard depth < 32, budget > 0 else { return [] }
+        guard depth < 32, budget > 0, !Task.isCancelled else { return [] }
         let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey]
         guard let items = try? FileManager.default.contentsOfDirectory(
             at: dir,

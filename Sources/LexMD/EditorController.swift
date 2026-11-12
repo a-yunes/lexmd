@@ -34,6 +34,11 @@ final class EditorController: NSObject, NSTextViewDelegate {
     /// Returns true when it handled Escape.
     var onCancel: (() -> Bool)?
     private var hasFindHighlights = false
+    /// Multi-line constructs from the last full highlight, kept in step with edits.
+    private var blocks: MarkdownBlocks?
+    /// The text edited since the last highlight, when only that part needs restyling.
+    private var pendingEdit: NSRange?
+    private var needsFullHighlight = true
 
     var fontSize: CGFloat = 14 {
         didSet {
@@ -90,6 +95,10 @@ final class EditorController: NSObject, NSTextViewDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(boundsDidChange(_:)),
             name: NSView.boundsDidChangeNotification, object: scrollView.contentView
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(storageDidProcessEditing(_:)),
+            name: NSTextStorage.didProcessEditingNotification, object: textView.textStorage
         )
         NotificationCenter.default.addObserver(
             self, selector: #selector(scrollerStyleDidChange(_:)),
@@ -310,18 +319,43 @@ final class EditorController: NSObject, NSTextViewDelegate {
         onScroll?(min(max(fraction, 0), 1))
     }
 
+    /// Records each text edit so the next highlight restyles only the edited paragraphs.
+    /// Edits that can open, close, or move a multi-line block fall back to a full pass.
+    @objc private func storageDidProcessEditing(_ notification: Notification) {
+        guard let storage = textView.textStorage, storage.editedMask.contains(.editedCharacters) else { return }
+        let edited = storage.editedRange
+        let delta = storage.changeInLength
+        let old = NSRange(location: edited.location, length: max(0, edited.length - delta))
+        let lines = (storage.string as NSString).lineRange(for: Self.withNextLine(edited, length: storage.length))
+        guard !needsFullHighlight, pendingEdit == nil, var blocks, !blocks.touchesBoundary(old),
+              !MarkdownBlocks.linesHaveDelimiter((storage.string as NSString).substring(with: lines)) else {
+            needsFullHighlight = true
+            pendingEdit = nil
+            return
+        }
+        blocks.shift(replacing: old, delta: delta)
+        self.blocks = blocks
+        pendingEdit = edited
+    }
+
+    /// Extends an edited range by one character so a line split by an inserted newline
+    /// includes the new line after it.
+    private static func withNextLine(_ range: NSRange, length: Int) -> NSRange {
+        let location = min(range.location, length)
+        return NSRange(location: location, length: min(range.length + 1, length - location))
+    }
+
     private func highlight(full: Bool) {
         guard let storage = textView.textStorage, !textView.hasMarkedText() else { return }
-        let length = storage.length
-        var range: NSRange?
-        if !full, length > 120_000 {
+        if !full, !needsFullHighlight, let edit = pendingEdit {
             let ns = storage.string as NSString
-            let sel = textView.selectedRange()
-            let start = max(0, sel.location - 3000)
-            let end = min(length, NSMaxRange(sel) + 3000)
-            range = ns.paragraphRange(for: NSRange(location: start, length: end - start))
+            let range = ns.paragraphRange(for: Self.withNextLine(edit, length: ns.length))
+            MarkdownHighlighter.highlight(storage, size: fontSize, in: range, blocks: blocks)
+        } else {
+            blocks = MarkdownHighlighter.highlight(storage, size: fontSize)
         }
-        MarkdownHighlighter.highlight(storage, size: fontSize, in: range)
+        pendingEdit = nil
+        needsFullHighlight = false
         textView.typingAttributes = MarkdownHighlighter.baseAttributes(size: fontSize)
     }
 }

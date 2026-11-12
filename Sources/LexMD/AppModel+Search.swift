@@ -206,21 +206,20 @@ extension AppModel {
         let filesOnly = quickMode == .files
         let options = quickOptions
         let files = FileScanner.searchableFiles(in: tree, root: root)
-        var overrides: [String: String] = [:]
-        if let current = currentFile?.path { overrides[current] = text }
         let currentPath = currentFile?.path
+        let overrides = currentPath.map { [$0: text] } ?? [:]
         isQuickSearching = true
         quickTask = Task { [weak self] in
             if debounce {
                 try? await Task.sleep(nanoseconds: 110_000_000)
                 guard !Task.isCancelled else { return }
             }
-            let results = await Task.detached(priority: .userInitiated) {
+            let results = await runDetached {
                 QuickSearchEngine.run(
                     query: query, options: options, files: files, overrides: overrides,
                     currentPath: currentPath, filesOnly: filesOnly
                 )
-            }.value
+            }
             guard let self, !Task.isCancelled else { return }
             self.quickResults = results
             self.isQuickSearching = false
@@ -242,6 +241,11 @@ extension AppModel {
             }
     }
 
+    /// The open document's live text, or the file's (cached) contents.
+    private func previewText(_ path: String) -> String {
+        path == currentFile?.path ? text : QuickSearchEngine.read(path) ?? ""
+    }
+
     private func updateQuickPreview() {
         guard isQuickSearchVisible, let item = quickItem(at: quickSelection) else {
             if quickPreview != nil { quickPreview = nil }
@@ -249,13 +253,13 @@ extension AppModel {
         }
         switch item {
         case .file(let file):
-            let text = quickResults.texts[file.path] ?? QuickSearchEngine.read(file.path) ?? ""
+            let text = previewText(file.path)
             let lines = text.components(separatedBy: "\n").prefix(10).enumerated().map {
                 QuickPreviewLine(id: $0.offset + 1, text: String($0.element.prefix(300)), match: nil)
             }
             quickPreview = QuickPreviewData(name: file.name, folder: file.folder, detail: "File", lines: lines)
         case .hit(let hit):
-            let text = quickResults.texts[hit.path] ?? ""
+            let text = previewText(hit.path)
             let all = text.components(separatedBy: "\n")
             let center = hit.line - 1
             let lower = max(0, center - 4), upper = min(all.count - 1, center + 5)

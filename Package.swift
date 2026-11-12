@@ -18,6 +18,11 @@ let package = Package(
             path: "Sources/LexMD",
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
+        .testTarget(
+            name: "LexMDTests",
+            dependencies: ["LexMD"],
+            path: "Tests/LexMDTests"
+        ),
     ],
     swiftLanguageModes: [.v5]
 )

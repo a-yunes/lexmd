@@ -7,31 +7,8 @@
       "layers": [
         {
           "glass": false,
-          "image-name": "LexMD-Light.png",
-          "name": "LexMD-Light",
-          "opacity-specializations": [
-            {
-              "value": 1
-            },
-            {
-              "appearance": "dark",
-              "value": 0
-            }
-          ]
-        },
-        {
-          "glass": false,
-          "image-name": "LexMD-Dark.png",
-          "name": "LexMD-Dark",
-          "opacity-specializations": [
-            {
-              "value": 0
-            },
-            {
-              "appearance": "dark",
-              "value": 1
-            }
-          ]
+          "image-name": "LexMD.png",
+          "name": "LexMD"
         }
       ],
       "shadow": {

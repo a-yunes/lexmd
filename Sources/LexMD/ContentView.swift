@@ -126,11 +126,12 @@ struct SidebarView: View {
 
     var body: some View {
         @Bindable var model = model
+        let rows = model.rootURL == nil ? [] : model.visibleRows
         Group {
             if let root = model.rootURL {
                 List(selection: $model.selectedPath) {
                     Section {
-                        ForEach(model.visibleRows) { row in
+                        ForEach(rows) { row in
                             FileRow(row: row)
                         }
                     } header: {
@@ -144,7 +145,7 @@ struct SidebarView: View {
                 }
                 .listStyle(.sidebar)
                 .overlay {
-                    if model.visibleTree.isEmpty, !model.isScanning {
+                    if rows.isEmpty, !model.isScanning {
                         if model.filter.isEmpty {
                             ContentUnavailableView(
                                 "No Markdown Files",

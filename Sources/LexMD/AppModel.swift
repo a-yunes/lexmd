@@ -23,7 +23,12 @@ final class AppModel {
 
     // Tree
     private(set) var rootURL: URL?
-    private(set) var tree: [FileNode] = []
+    private(set) var tree: [FileNode] = [] {
+        didSet { updateDisplayTree() }
+    }
+    /// The tree as displayed: compacted when the setting is on, before filtering.
+    private(set) var displayTree: [FileNode] = []
+    private(set) var displayFolderIDs: [String] = []
     private(set) var isScanning = false
     var filter = ""
     var expanded: Set<String> = [] {
@@ -63,7 +68,19 @@ final class AppModel {
     @ObservationIgnored var isNavigatingHistory = false
 
     var compactFolders = true {
-        didSet { defaults.set(compactFolders, forKey: Keys.compactFolders) }
+        didSet {
+            defaults.set(compactFolders, forKey: Keys.compactFolders)
+            updateDisplayTree()
+        }
+    }
+
+    /// Lets the preview load images and media from the web. Off by default, so opening a
+    /// document never contacts the servers it references.
+    var loadsRemoteContent = false {
+        didSet {
+            defaults.set(loadsRemoteContent, forKey: Keys.loadsRemoteContent)
+            preview.setAllowsRemoteContent(loadsRemoteContent)
+        }
     }
 
     // In-document find (preview find bar; the editor uses the native find bar)
@@ -94,7 +111,7 @@ final class AppModel {
     var quickFocusToken = 0
 
     let editor = EditorController()
-    let preview = PreviewController()
+    let preview = PreviewController(allowsRemoteContent: UserDefaults.standard.bool(forKey: Keys.loadsRemoteContent))
     let updates = UpdateService()
     var isOnboardingPresented = false
 
@@ -125,6 +142,7 @@ final class AppModel {
         static let appearance = "appearance"
         static let onboardingComplete = "onboardingComplete"
         static let recentFiles = "recentFiles"
+        static let loadsRemoteContent = "loadsRemoteContent"
     }
 
     private init() {
@@ -133,6 +151,7 @@ final class AppModel {
         fontScale = scale > 0 ? scale : 1
         recentFolders = defaults.stringArray(forKey: Keys.recentFolders) ?? []
         compactFolders = defaults.object(forKey: Keys.compactFolders) as? Bool ?? true
+        loadsRemoteContent = preview.allowsRemoteContent
         shortcutOverrides = defaults.dictionary(forKey: Keys.shortcuts) as? [String: String] ?? [:]
         recentFiles = defaults.stringArray(forKey: Keys.recentFiles) ?? []
         sidebarPosition = SidebarPosition(rawValue: defaults.string(forKey: Keys.sidebarPosition) ?? "") ?? .left
@@ -169,9 +188,9 @@ final class AppModel {
         return "\(words) \(wordCount == 1 ? "word" : "words") · \(minutes) min read"
     }
 
-    /// The tree as displayed: compacted when the setting is on, before filtering.
-    var displayTree: [FileNode] {
-        compactFolders ? FileScanner.compact(tree) : tree
+    private func updateDisplayTree() {
+        displayTree = compactFolders ? FileScanner.compact(tree) : tree
+        displayFolderIDs = FileScanner.folderIDs(in: displayTree)
     }
 
     var visibleTree: [FileNode] {
@@ -206,15 +225,15 @@ final class AppModel {
     /// The expand/collapse-all control only makes sense with at least two folders on screen,
     /// and not while filtering (filter results are always fully expanded).
     var canToggleAllFolders: Bool {
-        filter.trimmingCharacters(in: .whitespaces).isEmpty && FileScanner.folderIDs(in: displayTree).count >= 2
+        filter.trimmingCharacters(in: .whitespaces).isEmpty && displayFolderIDs.count >= 2
     }
 
     var allFoldersExpanded: Bool {
-        FileScanner.folderIDs(in: displayTree).allSatisfy { expanded.contains($0) }
+        displayFolderIDs.allSatisfy { expanded.contains($0) }
     }
 
     func setAllFoldersExpanded(_ value: Bool) {
-        setExpanded(subtreeOf: displayTree, value)
+        if value { expanded.formUnion(displayFolderIDs) } else { expanded.subtract(displayFolderIDs) }
     }
 
     /// Expands or collapses a folder together with every folder inside it.
@@ -317,7 +336,7 @@ final class AppModel {
         isScanning = tree.isEmpty
         scanTask?.cancel()
         scanTask = Task { [weak self] in
-            let nodes = await Task.detached(priority: .userInitiated) { FileScanner.scan(root) }.value
+            let nodes = await runDetached { FileScanner.scan(root) }
             guard let self, !Task.isCancelled, self.rootURL == root else { return }
             if nodes != self.tree { self.tree = nodes }
             self.isScanning = false
@@ -355,17 +374,44 @@ final class AppModel {
         if currentChanged { reloadFromDiskIfNeeded() }
     }
 
+    /// Follows a link clicked in the preview.
     func openLink(_ url: URL) {
-        guard url.isFileURL else {
+        guard url.isFileURL else { openExternalLink(url); return }
+        let path = FileScanner.canonicalPath(url.path)
+        guard FileManager.default.fileExists(atPath: path) else { NSSound.beep(); return }
+        let file = URL(fileURLWithPath: path)
+        if FileScanner.isMarkdown(path: path) {
+            open(file)
+        } else if FileScanner.opensWithoutRunningCode(file) {
+            NSWorkspace.shared.open(file)
+        } else {
+            // Apps, scripts, folders, and anything else that could run code are only revealed.
+            NSWorkspace.shared.activateFileViewerSelecting([file])
+        }
+    }
+
+    /// Web and mail links open directly; other schemes launch apps, so they ask first.
+    private func openExternalLink(_ url: URL) {
+        if ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") {
             NSWorkspace.shared.open(url)
             return
         }
-        let path = FileScanner.canonicalPath(url.path)
-        guard FileManager.default.fileExists(atPath: path) else { NSSound.beep(); return }
-        if FileScanner.isMarkdown(path: path) {
-            open(URL(fileURLWithPath: path))
+        let alert = NSAlert()
+        alert.messageText = "Open this link in another app?"
+        alert.informativeText = String(url.absoluteString.prefix(400))
+        alert.addButton(withTitle: "Open")
+        alert.addButton(withTitle: "Cancel")
+        present(alert) { response in
+            if response == .alertFirstButtonReturn { NSWorkspace.shared.open(url) }
+        }
+    }
+
+    /// Shows an alert as a sheet on the key window, or modally when there is none.
+    private func present(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            alert.beginSheetModal(for: window, completionHandler: completion)
         } else {
-            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            completion(alert.runModal())
         }
     }
 
@@ -469,9 +515,9 @@ final class AppModel {
                 try? await Task.sleep(nanoseconds: 90_000_000)
                 guard !Task.isCancelled else { return }
             }
-            let (html, words) = await Task.detached(priority: .userInitiated) {
+            let (html, words) = await runDetached {
                 (MarkdownHTML.render(source), MarkdownHTML.wordCount(source))
-            }.value
+            }
             guard let self, !Task.isCancelled else { return }
             let reset = self.pendingScrollReset
             self.pendingScrollReset = false
@@ -583,11 +629,7 @@ final class AppModel {
             guard response == .alertFirstButtonReturn else { return }
             self?.createDocument(named: field.stringValue, in: folder)
         }
-        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
-            alert.beginSheetModal(for: window, completionHandler: finish)
-        } else {
-            finish(alert.runModal())
-        }
+        present(alert, completion: finish)
     }
 
     private func createDocument(named rawName: String, in folder: URL) {
