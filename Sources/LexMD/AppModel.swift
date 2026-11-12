@@ -105,6 +105,11 @@ final class AppModel {
         didSet { defaults.set(shortcutOverrides, forKey: Keys.shortcuts) }
     }
     var shortcutNote: String?
+    /// The tab Settings shows, kept between launches. Set it before opening Settings to show a
+    /// specific tab; see `showSettings(_:using:)` and `SettingsTabButton`.
+    var settingsTab = SettingsTab(rawValue: UserDefaults.standard.string(forKey: SettingsTab.defaultsKey) ?? "") ?? .general {
+        didSet { defaults.set(settingsTab.rawValue, forKey: SettingsTab.defaultsKey) }
+    }
     private(set) var recentFiles: [String] = []
     var history: [String] = []
     var historyIndex = -1
@@ -142,6 +147,14 @@ final class AppModel {
     var typewriterScrolling = false {
         didSet { defaults.set(typewriterScrolling, forKey: Keys.typewriterScrolling); applyEditorSettings() }
     }
+    /// Edit > Substitutions and Correct Spelling Automatically; all off by default.
+    var substitutions = TextSubstitutions() {
+        didSet {
+            guard substitutions != oldValue else { return }
+            defaults.set(substitutions.dictionary, forKey: Keys.substitutions)
+            applyEditorSettings()
+        }
+    }
     /// Shows git status badges in the sidebar for projects in git repositories.
     var showGitStatus = true {
         didSet {
@@ -150,7 +163,7 @@ final class AppModel {
         }
     }
 
-    // In-document find (preview find bar; the editor uses the native find bar)
+    // In-document find and replace; the find bar searches the preview and the editor.
     var isFindBarVisible = false
     var findQuery = "" {
         didSet { if findQuery != oldValue { findIndex = 0; refreshFind(scroll: true) } }
@@ -158,9 +171,22 @@ final class AppModel {
     var findCaseSensitive = false {
         didSet { if findCaseSensitive != oldValue { findIndex = 0; refreshFind(scroll: true) } }
     }
+    var findWholeWord = false {
+        didSet { if findWholeWord != oldValue { findIndex = 0; refreshFind(scroll: true) } }
+    }
+    var findUsesRegex = false {
+        didSet { if findUsesRegex != oldValue { findIndex = 0; refreshFind(scroll: true) } }
+    }
     var findCount = 0
     var findIndex = 0
     var findFocusToken = 0
+    /// Shown in place of the match count after Replace All, until the next search.
+    var findStatus: String?
+    var isReplaceVisible = false
+    var replaceQuery = ""
+    var replaceFocusToken = 0
+    /// Whether the editor's selection can seed the find bar (Use Selection for Find).
+    var canUseSelectionForFind = false
 
     // Find in Files
     var isQuickSearchVisible = false
@@ -257,6 +283,7 @@ final class AppModel {
         static let checksGrammar = "checksGrammar"
         static let focusMode = "focusMode"
         static let typewriterScrolling = "typewriterScrolling"
+        static let substitutions = "textSubstitutions"
         static let showGitStatus = "showGitStatus"
         static let outlineVisible = "outlineVisible"
         static let suggestsLinks = "suggestsLinks"
@@ -280,6 +307,7 @@ final class AppModel {
         checksGrammar = defaults.bool(forKey: Keys.checksGrammar)
         focusMode = defaults.bool(forKey: Keys.focusMode)
         typewriterScrolling = defaults.bool(forKey: Keys.typewriterScrolling)
+        substitutions = TextSubstitutions(dictionary: defaults.dictionary(forKey: Keys.substitutions))
         configureEditorFeatures()
         isOutlineVisible = defaults.bool(forKey: Keys.outlineVisible)
         suggestsLinks = defaults.object(forKey: Keys.suggestsLinks) as? Bool ?? true
@@ -313,9 +341,13 @@ final class AppModel {
         if let saveError { return saveError }
         guard currentFile != nil else { return rootURL?.lastPathComponent ?? "" }
         if isCurrentDocumentMissing { return "No longer on disk; saving puts it back" }
-        let words = wordCount.formatted()
-        let minutes = max(1, Int((Double(wordCount) / 230).rounded()))
-        return "\(words) \(wordCount == 1 ? "word" : "words") · \(minutes) min read"
+        return Self.readingSummary(words: wordCount)
+    }
+
+    /// The word count and reading time shown under the document's title.
+    static func readingSummary(words: Int) -> String {
+        let minutes = max(1, Int((Double(words) / 230).rounded()))
+        return String(AttributedString(localized: "^[\(words) word](inflect: true) · \(minutes) min read").characters)
     }
 
     func updateDisplayTree() {
@@ -431,10 +463,10 @@ final class AppModel {
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = FileScanner.markdownExtensions.compactMap { UTType(filenameExtension: $0) } + [.folder]
         panel.prompt = "Open"
-        panel.message = "Choose a folder to browse, or a Markdown file to open."
+        panel.message = "Choose a project folder, or a Markdown document to open."
         if let rootURL { panel.directoryURL = rootURL }
-        if panel.runModal() == .OK, let url = panel.url {
-            open(url)
+        present(panel) { [weak self] response in
+            if response == .OK, let url = panel.url { self?.open(url) }
         }
     }
 
@@ -654,39 +686,55 @@ final class AppModel {
     /// Closes a project whose folder is gone, first offering to save `documents` elsewhere.
     private func closeProjectKeeping(_ documents: [(path: String, text: String)], name: String) {
         guard !documents.isEmpty else { closeProject(); return }
+        present(Self.missingProjectAlert(name: name, documents: documents)) { [weak self] response in
+            guard let self else { return }
+            guard response == .alertFirstButtonReturn else { self.closeProject(); return }
+            let panel = Self.unsavedDocumentsFolderPanel()
+            self.present(panel) { [weak self] response in
+                guard let self else { return }
+                guard response == .OK, let folder = panel.url else {
+                    self.closeProjectKeeping(documents, name: name)
+                    return
+                }
+                do {
+                    for document in documents {
+                        let file = (document.path as NSString).lastPathComponent as NSString
+                        let target = FileOperations.uniqueURL(in: folder, base: file.deletingPathExtension, extension: file.pathExtension)
+                        try document.text.write(to: target, atomically: true, encoding: .utf8)
+                    }
+                    self.closeProject()
+                } catch {
+                    // Ask again once the error has been read, so the text is never dropped.
+                    self.present(NSAlert(error: error)) { [weak self] _ in self?.closeProjectKeeping(documents, name: name) }
+                }
+            }
+        }
+    }
+
+    /// The project folder is gone and some text was never written. There is no Cancel: the
+    /// project can't stay open, so the text is either kept elsewhere or discarded.
+    static func missingProjectAlert(name: String, documents: [(path: String, text: String)]) -> NSAlert {
         let alert = NSAlert()
+        alert.alertStyle = .warning
         alert.messageText = "“\(name)” is no longer available"
         let what = documents.count == 1
             ? "Changes to “\((documents[0].path as NSString).lastPathComponent)”"
             : "Changes to \(documents.count) documents"
         alert.informativeText = "\(what) couldn’t be saved because the project folder is gone. Save them in another folder to keep them."
         alert.addButton(withTitle: "Save to Folder…")
-        alert.addButton(withTitle: "Discard Changes")
-        present(alert) { [weak self] response in
-            guard let self else { return }
-            guard response == .alertFirstButtonReturn else { self.closeProject(); return }
-            let panel = NSOpenPanel()
-            panel.canChooseFiles = false
-            panel.canChooseDirectories = true
-            panel.canCreateDirectories = true
-            panel.prompt = "Save"
-            panel.message = "Choose a folder for the unsaved documents."
-            guard panel.runModal() == .OK, let folder = panel.url else {
-                self.closeProjectKeeping(documents, name: name)
-                return
-            }
-            do {
-                for document in documents {
-                    let file = (document.path as NSString).lastPathComponent as NSString
-                    let target = FileOperations.uniqueURL(in: folder, base: file.deletingPathExtension, extension: file.pathExtension)
-                    try document.text.write(to: target, atomically: true, encoding: .utf8)
-                }
-                self.closeProject()
-            } catch {
-                NSAlert(error: error).runModal()
-                self.closeProjectKeeping(documents, name: name)
-            }
-        }
+        alert.addDestructiveButton("Discard Changes")
+        return alert
+    }
+
+    /// Asks for a folder to keep documents that can't be saved in place.
+    static func unsavedDocumentsFolderPanel() -> NSOpenPanel {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.prompt = "Save"
+        panel.message = "Choose a folder for the unsaved documents."
+        return panel
     }
 
     /// Closes the open project; its unsaved changes have already been kept or discarded.
@@ -733,18 +781,9 @@ final class AppModel {
         alert.messageText = "Open this link in another app?"
         alert.informativeText = String(url.absoluteString.prefix(400))
         alert.addButton(withTitle: "Open")
-        alert.addButton(withTitle: "Cancel")
+        alert.addCancelButton()
         present(alert) { response in
             if response == .alertFirstButtonReturn { NSWorkspace.shared.open(url) }
-        }
-    }
-
-    /// Shows an alert as a sheet on the key window, or modally when there is none.
-    func present(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
-        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
-            alert.beginSheetModal(for: window, completionHandler: completion)
-        } else {
-            completion(alert.runModal())
         }
     }
 
@@ -956,54 +995,11 @@ final class AppModel {
 
     // MARK: - New document
 
+    /// Creates "Untitled.md" next to the open document, or at the top of the project, selects it,
+    /// and starts naming it in the sidebar, as the sidebar's New Document does.
     func newDocument() {
-        guard let root = rootURL else { showOpenPanel(); return }
-        var folder = root
-        if let current = currentFile?.deletingLastPathComponent(), current.path.hasPrefix(root.path) {
-            folder = current
-        }
-        let alert = NSAlert()
-        alert.messageText = "New Markdown Document"
-        alert.informativeText = "Create it in “\(folder.lastPathComponent)”."
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        field.placeholderString = "Untitled"
-        field.bezelStyle = .roundedBezel
-        alert.accessoryView = field
-        alert.addButton(withTitle: "Create")
-        alert.addButton(withTitle: "Cancel")
-        alert.window.initialFirstResponder = field
-        let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
-            guard response == .alertFirstButtonReturn else { return }
-            self?.createDocument(named: field.stringValue, in: folder)
-        }
-        present(alert, completion: finish)
-    }
-
-    private func createDocument(named rawName: String, in folder: URL) {
-        var name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: ":", with: "-")
-        if name.isEmpty { name = "Untitled" }
-        var base = name
-        if FileScanner.isMarkdown(path: name) { base = (name as NSString).deletingPathExtension } else { name += ".md" }
-        let ext = (name as NSString).pathExtension
-        var url = folder.appendingPathComponent(name)
-        var counter = 2
-        while FileManager.default.fileExists(atPath: url.path) {
-            url = folder.appendingPathComponent("\(base) \(counter).\(ext)")
-            counter += 1
-        }
-        do {
-            try "# \(base)\n\n".write(to: url, atomically: false, encoding: .utf8)
-        } catch {
-            NSAlert(error: error).runModal()
-            return
-        }
-        rescanSoon()
-        if viewMode == .read { setViewMode(.split) }
-        open(url)
-        editor.focus()
-        editor.moveCursorToEnd()
+        guard rootURL != nil else { showOpenPanel(); return }
+        newFile(near: currentFile)
     }
 
     // MARK: - Onboarding

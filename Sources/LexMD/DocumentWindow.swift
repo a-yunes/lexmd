@@ -260,3 +260,16 @@ final class SidebarQuickLook: NSResponder, QLPreviewPanelDataSource, QLPreviewPa
         }
     }
 }
+
+extension AppModel {
+    /// The file Quick Look shows: the sidebar selection, or else the open document.
+    var quickLookTarget: URL? {
+        (selectedPath ?? currentFile?.path).map { URL(fileURLWithPath: $0) }
+    }
+
+    /// File > Quick Look: shows or closes the panel for the sidebar selection.
+    func quickLookSelection() {
+        guard let url = quickLookTarget else { NSSound.beep(); return }
+        SidebarQuickLook.shared.toggle(url)
+    }
+}

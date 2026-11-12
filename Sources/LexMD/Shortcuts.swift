@@ -13,13 +13,13 @@ struct Shortcut: Hashable {
     private static let specialKeys: [UInt16: String] = [
         123: "leftArrow", 124: "rightArrow", 125: "downArrow", 126: "upArrow",
         36: "return", 76: "return", 48: "tab", 49: "space", 51: "delete", 117: "deleteForward",
-        115: "home", 119: "end", 116: "pageUp", 121: "pageDown",
+        115: "home", 119: "end", 116: "pageUp", 121: "pageDown", 53: "escape",
     ]
 
     private static let symbols: [String: String] = [
         "leftArrow": "←", "rightArrow": "→", "downArrow": "↓", "upArrow": "↑",
         "return": "↩", "tab": "⇥", "space": "Space", "delete": "⌫", "deleteForward": "⌦",
-        "home": "↖", "end": "↘", "pageUp": "⇞", "pageDown": "⇟",
+        "home": "↖", "end": "↘", "pageUp": "⇞", "pageDown": "⇟", "escape": "⎋",
     ]
 
     init(key: String, modifiers: NSEvent.ModifierFlags) {
@@ -81,6 +81,7 @@ struct Shortcut: Hashable {
         case "delete": equivalent = .delete
         case "deleteForward": equivalent = .deleteForward
         case "home": equivalent = .home
+        case "escape": equivalent = .escape
         case "end": equivalent = .end
         case "pageUp": equivalent = .pageUp
         case "pageDown": equivalent = .pageDown
@@ -109,45 +110,43 @@ struct Shortcut: Hashable {
 
 /// Every command that can carry a keyboard shortcut, with its default.
 enum ShortcutAction: String, CaseIterable, Identifiable {
-    case open, quickOpen, newDocument, save, revealInFinder
-    case toggleSidebar, previewOnly, split, editorOnly, expandAll, collapseAll, zoomIn, zoomOut, zoomReset
-    case find, findNext, findPrevious, findInFiles
-    case goBack, goForward
-    case bold, italic, strikethrough, inlineCode, link
-    case newFolder, renameItem, duplicateItem, moveToTrash
-    case closeTab, reopenClosedTab, showNextTab, showPreviousTab
-    case newTab
-    case formatTable
-    case focusMode, typewriterScrolling
-    case commit
-    case exportPDF, exportHTML, printDocument, copyRichText
-    case toggleOutline
+    // Declared in menu order, which is the order Settings lists them in. The raw values are the
+    // keys of saved shortcuts, so a case is never renamed.
     case installCommandLineTool
+    case newDocument, newFolder, newTab, open, quickOpen, closeWindow, closeTab, reopenClosedTab, save
+    case revealInFinder, renameItem, duplicateItem, moveTo, moveToTrash, exportPDF, exportHTML, printDocument
+    case copyRichText, find, findAndReplace, findNext, findPrevious, useSelectionForFind, jumpToSelection, findInFiles
+    case bold, italic, strikethrough, inlineCode, link, formatTable
+    case toggleSidebar, toggleOutline, previewOnly, split, editorOnly, focusMode, typewriterScrolling
+    case expandAll, collapseAll, zoomIn, zoomOut, zoomReset
+    case goBack, goForward
+    case commit
+    case showPreviousTab, showNextTab
     case renameInSidebar, trashInSidebar, quickLookInSidebar
 
     var id: String { rawValue }
 
+    /// The menu a command appears in, in menu bar order. The raw value is the menu's name.
     enum Category: String, CaseIterable {
-        case file = "File", navigate = "Navigate", find = "Find", view = "View", format = "Format"
-        case sourceControl = "Source Control"
+        case app = "LexMD", file = "File", edit = "Edit", format = "Format", view = "View", go = "Go"
+        case sourceControl = "Source Control", window = "Window"
+        /// Commands for the file list, which work while it has focus.
         case sidebar = "Sidebar"
     }
 
     var category: Category {
         switch self {
-        case .open, .quickOpen, .newDocument, .save, .revealInFinder: .file
-        case .goBack, .goForward: .navigate
-        case .find, .findNext, .findPrevious, .findInFiles: .find
-        case .toggleSidebar, .editorOnly, .split, .previewOnly, .expandAll, .collapseAll, .zoomIn, .zoomOut, .zoomReset: .view
-        case .toggleOutline: .view
-        case .bold, .italic, .strikethrough, .inlineCode, .link: .format
-        case .newFolder, .renameItem, .duplicateItem, .moveToTrash, .closeTab, .reopenClosedTab, .newTab: .file
-        case .showNextTab, .showPreviousTab: .navigate
-        case .formatTable: .format
-        case .focusMode, .typewriterScrolling: .view
+        case .installCommandLineTool: .app
+        case .newDocument, .newFolder, .newTab, .open, .quickOpen, .closeWindow, .closeTab, .reopenClosedTab, .save,
+             .revealInFinder, .renameItem, .duplicateItem, .moveTo, .moveToTrash, .exportPDF, .exportHTML, .printDocument: .file
+        case .copyRichText, .find, .findAndReplace, .findNext, .findPrevious, .useSelectionForFind, .jumpToSelection,
+             .findInFiles: .edit
+        case .bold, .italic, .strikethrough, .inlineCode, .link, .formatTable: .format
+        case .toggleSidebar, .toggleOutline, .previewOnly, .split, .editorOnly, .focusMode, .typewriterScrolling,
+             .expandAll, .collapseAll, .zoomIn, .zoomOut, .zoomReset: .view
+        case .goBack, .goForward: .go
         case .commit: .sourceControl
-        case .exportPDF, .exportHTML, .printDocument, .copyRichText: .file
-        case .installCommandLineTool: .file
+        case .showPreviousTab, .showNextTab: .window
         case .renameInSidebar, .trashInSidebar, .quickLookInSidebar: .sidebar
         }
     }
@@ -156,10 +155,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .open: "Open…"
         case .quickOpen: "Open Quickly…"
-        case .newDocument: "New Document…"
+        case .newDocument: "New Document"
         case .save: "Save"
-        case .revealInFinder: "Reveal in Finder"
-        case .toggleSidebar: "Show/Hide Sidebar"
+        case .revealInFinder: "Show in Finder"
+        case .toggleSidebar: "Show or Hide Sidebar"
         case .previewOnly: "Preview Only"
         case .split: "Preview and Editor"
         case .editorOnly: "Editor Only"
@@ -172,6 +171,9 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .findNext: "Find Next"
         case .findPrevious: "Find Previous"
         case .findInFiles: "Find in Files…"
+        case .findAndReplace: "Find and Replace…"
+        case .useSelectionForFind: "Use Selection for Find"
+        case .jumpToSelection: "Jump to Selection"
         case .goBack: "Back"
         case .goForward: "Forward"
         case .bold: "Bold"
@@ -182,9 +184,11 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .newFolder: "New Folder"
         case .renameItem: "Rename"
         case .duplicateItem: "Duplicate"
+        case .moveTo: "Move To…"
         case .moveToTrash: "Move to Trash"
         case .closeTab: "Close Tab"
-        case .newTab: "New Tab"
+        case .closeWindow: "Close Window"
+        case .newTab: "New Tab…"
         case .reopenClosedTab: "Reopen Closed Tab"
         case .showNextTab: "Show Next Tab"
         case .showPreviousTab: "Show Previous Tab"
@@ -196,7 +200,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .exportHTML: "Export as HTML…"
         case .printDocument: "Print…"
         case .copyRichText: "Copy as Rich Text"
-        case .toggleOutline: "Show/Hide Outline"
+        case .toggleOutline: "Show or Hide Outline"
         case .installCommandLineTool: "Install Command Line Tool…"
         case .renameInSidebar: "Rename in Sidebar"
         case .trashInSidebar: "Move to Trash in Sidebar"
@@ -228,6 +232,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .findNext: "cmd+g"
         case .findPrevious: "shift+cmd+g"
         case .findInFiles: "shift+cmd+f"
+        // The standard ⌥⌘F and ⌘E belong to Focus Mode and Inline Code.
+        case .findAndReplace: ""
+        case .useSelectionForFind: ""
+        case .jumpToSelection: "cmd+j"
         case .goBack: "cmd+["
         case .goForward: "cmd+]"
         case .bold: "shift+cmd+b"
@@ -238,8 +246,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .newFolder: "shift+cmd+n"
         case .renameItem: ""
         case .duplicateItem: ""
+        case .moveTo: ""
         case .moveToTrash: ""
         case .closeTab: "cmd+w"
+        case .closeWindow: "shift+cmd+w"
         case .newTab: "cmd+t"
         case .reopenClosedTab: "shift+cmd+t"
         case .showNextTab: "ctrl+tab"

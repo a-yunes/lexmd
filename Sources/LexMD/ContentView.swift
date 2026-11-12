@@ -114,7 +114,7 @@ private struct DetailColumn: View {
         }
         if trailingSidebar {
             ToolbarItem(id: ToolbarID.trailingSidebar, placement: .primaryAction) {
-                let title = model.isInspectorPresented ? "Hide Sidebar" : "Show Sidebar"
+                let title = model.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar"
                 Button { model.toggleSidebar() } label: {
                     Label(title, systemImage: "sidebar.trailing")
                 }
@@ -286,9 +286,9 @@ struct SidebarView: View {
                     if rows.isEmpty, !model.isScanning {
                         if model.filter.isEmpty {
                             ContentUnavailableView(
-                                "No Markdown Files",
+                                "No Markdown Documents",
                                 systemImage: "doc.text.magnifyingglass",
-                                description: Text("This folder doesn’t contain any Markdown documents.")
+                                description: Text("This project doesn’t contain any Markdown documents.")
                             )
                         } else {
                             ContentUnavailableView.search(text: model.filter)
@@ -299,7 +299,7 @@ struct SidebarView: View {
                 ContentUnavailableView {
                     Label("No Project Open", systemImage: "folder")
                 } description: {
-                    Text("Open a repository or folder to see all of its Markdown.")
+                    Text("Open a project folder to see all of its Markdown documents.")
                 } actions: {
                     Button("Open Project…") { model.showOpenPanel() }
                         .buttonStyle(.borderedProminent)
@@ -475,7 +475,7 @@ struct RowMenu: View {
         if !url.hasDirectoryPath {
             Button("Quick Look") { SidebarQuickLook.shared.toggle(url) }
         }
-        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         Button("Copy Path") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(url.path, forType: .string)
@@ -518,8 +518,8 @@ struct DetailView: View {
                     "No Document Selected",
                     systemImage: "doc.text",
                     description: Text(model.rootURL == nil
-                        ? "Open a project or a Markdown file to start reading."
-                        : "Choose a Markdown file from the sidebar.")
+                        ? "Open a project or a Markdown document to start reading."
+                        : "Choose a Markdown document from the sidebar.")
                 )
             }
         }

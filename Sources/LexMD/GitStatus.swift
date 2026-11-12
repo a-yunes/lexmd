@@ -6,25 +6,40 @@ import UniformTypeIdentifiers
 enum GitChangeKind: String, Sendable, CaseIterable {
     case modified, added, untracked, deleted, renamed, conflicted
 
-    /// One letter, as in Xcode's project navigator.
+    /// One character, as in Xcode's project navigator: "A" for a new file added to the index,
+    /// "?" for a new file Git doesn't track yet.
     var letter: String {
         switch self {
         case .modified: "M"
-        case .added, .untracked: "A"
+        case .added: "A"
+        case .untracked: "?"
         case .deleted: "D"
         case .renamed: "R"
         case .conflicted: "C"
         }
     }
 
+    /// The name of the change, for accessibility.
     var label: String {
         switch self {
         case .modified: "Modified"
         case .added: "Added"
-        case .untracked: "New, not yet tracked"
+        case .untracked: "Untracked"
         case .deleted: "Deleted"
         case .renamed: "Renamed"
         case .conflicted: "Conflicted"
+        }
+    }
+
+    /// The badge's tooltip: the name of the change and what it means.
+    var help: String {
+        switch self {
+        case .modified: "Modified: changed since the last commit"
+        case .added: "Added: new, and staged for the next commit"
+        case .untracked: "Untracked: new, and not yet added to Git"
+        case .deleted: "Deleted: removed since the last commit"
+        case .renamed: "Renamed: moved or renamed since the last commit"
+        case .conflicted: "Conflicted: has merge conflicts to resolve"
         }
     }
 

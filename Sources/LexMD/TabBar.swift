@@ -189,7 +189,7 @@ private struct TabItem: View {
             Button("Close Other Tabs") { model.closeOtherTabs(tab.id) }
                 .disabled(model.tabStore.list.count < 2)
             Divider()
-            Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: tab.path)]) }
+            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: tab.path)]) }
             Button("Copy Path") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(tab.path, forType: .string)

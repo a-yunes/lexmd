@@ -35,13 +35,8 @@ extension AppModel {
             Task { @MainActor in
                 do {
                     let result = try await Exporter.exportHTML(document, to: url)
-                    guard !result.linkedImages.isEmpty else { return }
-                    let names = result.linkedImages.prefix(3).joined(separator: ", ")
-                    let more = result.linkedImages.count > 3 ? " and \(result.linkedImages.count - 3) more" : ""
-                    ExportNote.show(
-                        "Some images were too large to embed and are linked instead: \(names)\(more).",
-                        in: self?.exportWindow
-                    )
+                    guard let note = Self.linkedImagesNote(result.linkedImages) else { return }
+                    ExportNote.show(note, in: self?.exportWindow)
                 } catch {
                     self?.showExportError(error, file: url)
                 }
@@ -97,13 +92,23 @@ extension AppModel {
         panel.isExtensionHidden = false
         panel.nameFieldStringValue = "\(document.title).\(type.preferredFilenameExtension ?? "")"
         panel.directoryURL = document.baseURL
-        let handle: (NSApplication.ModalResponse) -> Void = { response in
+        present(panel) { response in
             if response == .OK, let url = panel.url { completion(url) }
         }
-        if let window = exportWindow {
-            panel.beginSheetModal(for: window, completionHandler: handle)
-        } else {
-            handle(panel.runModal())
+    }
+
+    /// Names the images an HTML export links instead of embedding, or nil when there are none.
+    static func linkedImagesNote(_ images: [String]) -> String? {
+        switch images.count {
+        case 0:
+            return nil
+        case 1:
+            return "“\(images[0])” was too large to embed, so the page links to it instead."
+        default:
+            var names = images.prefix(3).map { "“\($0)”" }
+            if images.count > 3 { names.append(images.count == 4 ? "1 other" : "\(images.count - 3) others") }
+            let list = names.formatted(.list(type: .and))
+            return "\(images.count) images were too large to embed, so the page links to them instead: \(list)."
         }
     }
 
@@ -111,9 +116,9 @@ extension AppModel {
         let alert = NSAlert()
         alert.alertStyle = .warning
         if let file {
-            alert.messageText = "Couldn’t export “\(file.lastPathComponent)”."
+            alert.messageText = "Couldn’t export “\(file.lastPathComponent)”"
         } else {
-            alert.messageText = "Couldn’t complete the command."
+            alert.messageText = "Couldn’t complete the command"
         }
         alert.informativeText = error.localizedDescription
         present(alert) { _ in }

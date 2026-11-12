@@ -198,13 +198,15 @@ extension AppModel {
         if let key = NSApp.keyWindow, key.sheetParent != nil || (key === mainWindow && key.attachedSheet != nil) {
             // A sheet (such as Commit) is in front; it closes with its own buttons.
             NSSound.beep()
-        } else if let key = NSApp.keyWindow, key !== mainWindow {
+        } else if let key = NSApp.keyWindow, let mainWindow, key !== mainWindow {
             key.performClose(nil)
         } else if currentFile != nil, let id = tabStore.list.activeID {
             closeTab(id)
-        } else {
-            (NSApp.keyWindow ?? mainWindow)?.performClose(nil)
+        } else if let window = NSApp.keyWindow ?? mainWindow, Self.otherWindowsRemainOpen(besides: window, in: NSApp.windows) {
+            window.performClose(nil)
         }
+        // Otherwise the window is the last one, and closing it would quit LexMD; Close Window
+        // remains for that.
     }
 
     func closeTab(_ id: UUID) {
@@ -362,15 +364,20 @@ extension AppModel {
     }
 
     private func confirmDiscard(_ title: String, discard: @escaping () -> Void) {
+        present(Self.discardConfirmation(title)) { response in
+            if response == .alertFirstButtonReturn { discard() }
+        }
+    }
+
+    /// Closing a tab whose text couldn't be saved. Discard Changes closes it; Cancel keeps it.
+    static func discardConfirmation(_ title: String) -> NSAlert {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "“\(title)” has changes that couldn’t be saved."
-        alert.informativeText = "If you close it, those changes are lost."
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Close Anyway")
-        present(alert) { response in
-            if response == .alertSecondButtonReturn { discard() }
-        }
+        alert.messageText = "Changes to “\(title)” couldn’t be saved"
+        alert.informativeText = "If you close the tab now, the changes are lost."
+        alert.addDestructiveButton("Discard Changes")
+        alert.addCancelButton()
+        return alert
     }
 
     /// Clears the editor and preview when the last tab closes.
@@ -433,7 +440,7 @@ extension EditorController {
     /// Undoing or redoing edits made through the text storage does not report the change to
     /// the delegate, so the model would keep (and autosave) the text from before the undo. This
     /// reports it once the undo or redo has run.
-    private func registerTextChangeOnUndo() {
+    func registerTextChangeOnUndo() {
         textView.undoManager?.registerUndo(withTarget: self) { editor in
             MainActor.assumeIsolated {
                 editor.registerTextChangeOnUndo()

@@ -248,8 +248,7 @@ extension AppModel {
 
     /// Recomputes whether the outline fits beside the document at the current window width.
     func updateOutlineFit() {
-        let sidebarVisible = sidebarPosition == .right ? isInspectorPresented : columnVisibility != .detailOnly
-        let fits = OutlineLayout.fits(windowWidth: windowWidth, sidebarVisible: sidebarVisible, mode: viewMode)
+        let fits = OutlineLayout.fits(windowWidth: windowWidth, sidebarVisible: isSidebarVisible, mode: viewMode)
         guard fits != outlineFitsWindow else { return }
         outlineFitsWindow = fits
         if fits { showsOutlineWhileNarrow = false }

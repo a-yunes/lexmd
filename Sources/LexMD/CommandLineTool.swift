@@ -11,6 +11,9 @@ enum CommandLineTool {
         return path
     }
 
+    /// Whether this copy of LexMD contains the tool. The install command is shown only then.
+    static let isBundled = bundledTool != nil
+
     enum LinkState: Equatable {
         case missing
         /// A link to this tool.
@@ -93,7 +96,7 @@ extension AppModel {
             alert.messageText = "\(link) already exists"
             alert.informativeText = "It is not a link, so LexMD leaves it alone. You can link the tool from your own bin folder instead."
             alert.addButton(withTitle: "Copy Command")
-            alert.addButton(withTitle: "Cancel")
+            alert.addCancelButton()
             present(alert) { [weak self] response in
                 if response == .alertFirstButtonReturn { self?.copyCommandLineToolCommand(tool) }
             }
@@ -104,7 +107,7 @@ extension AppModel {
             alert.informativeText = """
             It points to \(destination). Replace it with a link to this copy of LexMD? macOS will ask for an administrator password.
             """
-            alert.addButton(withTitle: "Replace…")
+            alert.addDestructiveButton("Replace…")
             replace = true
         case .missing:
             alert.messageText = "Install the lexmd command?"
@@ -116,11 +119,14 @@ extension AppModel {
             alert.addButton(withTitle: "Install…")
             replace = false
         }
-        alert.addButton(withTitle: "Copy Command")
-        alert.addButton(withTitle: "Cancel")
+        let copy = alert.addButton(withTitle: "Copy Command")
+        // Replacing another link is never the default; copying the command is.
+        if replace { alert.makeDefault(copy) }
+        alert.addCancelButton()
         present(alert) { [weak self] response in
             switch response {
             case .alertFirstButtonReturn:
+                // Runs once the sheet has ended, as the password prompt is modal.
                 DispatchQueue.main.async { self?.runCommandLineToolInstall(tool: tool, link: link, replace: replace) }
             case .alertSecondButtonReturn:
                 self?.copyCommandLineToolCommand(tool)
@@ -139,15 +145,15 @@ extension AppModel {
         let alert = NSAlert()
         if let error {
             alert.alertStyle = .warning
-            alert.messageText = "The lexmd command could not be installed"
-            alert.informativeText = (error[NSAppleScript.errorMessage] as? String) ?? "Unknown error."
+            alert.messageText = "Couldn’t install the lexmd command"
+            alert.informativeText = (error[NSAppleScript.errorMessage] as? String) ?? "An unknown error occurred."
         } else if CommandLineTool.state(of: link, tool: tool) == .installed {
             alert.messageText = "The lexmd command is installed"
             alert.informativeText = "Type lexmd --help in Terminal to get started."
         } else {
             alert.alertStyle = .warning
-            alert.messageText = "The lexmd command could not be installed"
-            alert.informativeText = "\(link) does not link to LexMD."
+            alert.messageText = "Couldn’t install the lexmd command"
+            alert.informativeText = "\(link) doesn’t link to LexMD."
         }
         present(alert) { _ in }
     }
@@ -159,6 +165,6 @@ extension AppModel {
         let alert = NSAlert()
         alert.messageText = "Command copied"
         alert.informativeText = "Paste it in Terminal:\n\n\(command)\n\nThen make sure ~/bin is in your PATH."
-        DispatchQueue.main.async { [weak self] in self?.present(alert) { _ in } }
+        present(alert) { _ in }
     }
 }

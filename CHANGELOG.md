@@ -15,6 +15,9 @@
 - LexMD follows a project folder that is renamed or moved, and closes one that is deleted after
   keeping any unsaved changes. Expanded folders are remembered for each recent project.
 - Rename (↩) and Move to Trash (⌘⌫) in the sidebar can be changed in Settings > Shortcuts.
+- Settings has General, Editor, Preview, Source Control, Shortcuts and Updates tabs and reopens
+  on the last one. Shortcuts are grouped like the menus and can be searched by name or keys;
+  combinations macOS keeps for itself, such as ⌘Q or ⌘Space, are refused with the reason.
 - Create, rename, duplicate, move and trash files and folders in the sidebar. Renaming or moving
   a document offers to update every link to it, and the change can be undone.
 - Export as PDF (⇧⌘E) or HTML, Print (⌥⌘P), and Copy as Rich Text (⌥⌘C), with diagrams and math
@@ -28,7 +31,7 @@
   field. It appears only when there are such changes, commits only the files you pick, and never
   contacts a remote. Git features stay hidden outside repositories.
 - Quick Look previews of Markdown files in Finder, a `lexmd` command (LexMD > Install Command
-  Line Tool…), and Shortcuts actions: Open in LexMD, Create Note, and Get Current Document.
+  Line Tool…), and Shortcuts actions: Open in LexMD, Create Document, and Get Current Document.
 
 ## 1.0.0
 
