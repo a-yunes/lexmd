@@ -58,6 +58,7 @@ enum PreviewTemplate {
     });
     var nextSrc = next.map(sourceOf);
     if (reset) {
+      spyPin = null;
       content.textContent = '';
       next.forEach(function (n, i) { n.__src = nextSrc[i]; content.appendChild(n); prepare(n); });
       window.scrollTo(0, 0);
@@ -153,6 +154,7 @@ enum PreviewTemplate {
   window.addEventListener('resize', updateIndicator);
 
   window.lexmdScroll = function (f) {
+    spyPin = null;
     var max = document.documentElement.scrollHeight - window.innerHeight;
     if (max > 0) window.scrollTo(0, Math.round(max * f));
   };
@@ -183,7 +185,9 @@ enum PreviewTemplate {
   });
 
   // Outline: scroll to a heading, and report the heading in view as the page scrolls or changes.
-  var spyId = null, spyHold = 0, spyTimer = null;
+  // A revealed heading stays current while the page scrolls to it and while the page stays
+  // there, even when the next heading is close below it or the page cannot scroll that far.
+  var spyId = null, spyPin = null, spyTimer = null;
   function headingInView() {
     // Headings drawn inside diagrams, math, or footnotes are not document headings.
     var hs = Array.prototype.filter.call(content.querySelectorAll('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]'), function (h) {
@@ -206,7 +210,13 @@ enum PreviewTemplate {
     if (spyTimer) return;
     spyTimer = setTimeout(function () {
       spyTimer = null;
-      if (Date.now() >= spyHold) reportHeading(headingInView());
+      if (spyPin) {
+        var arrived = Math.abs(window.scrollY - spyPin.y) <= 2;
+        if (arrived) spyPin.arrived = true;
+        if (arrived || (!spyPin.arrived && Date.now() < spyPin.until)) { reportHeading(spyPin.id); return; }
+        spyPin = null;
+      }
+      reportHeading(headingInView());
     }, 60);
   }
   window.addEventListener('scroll', queueSpy, { passive: true });
@@ -215,8 +225,11 @@ enum PreviewTemplate {
   window.lexmdReveal = function (id, smooth) {
     var target = document.getElementById(id);
     if (!target) return false;
-    spyHold = smooth ? Date.now() + 700 : 0;
-    target.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
+    var margin = parseFloat(getComputedStyle(target).scrollMarginTop) || 0;
+    var max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    var y = Math.round(Math.min(max, Math.max(0, window.scrollY + target.getBoundingClientRect().top - margin)));
+    spyPin = { id: id, y: y, until: Date.now() + 1500, arrived: false };
+    window.scrollTo({ top: y, behavior: smooth ? 'smooth' : 'auto' });
     reportHeading(id);
     return true;
   };

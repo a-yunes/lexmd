@@ -301,12 +301,14 @@ extension AppModel {
 
     /// Scrolls the preview and the editor to a heading from the outline.
     func revealHeading(_ heading: OutlineHeading) {
-        outline.setCurrentHeading(heading.id)
         if viewMode != .read {
             editor.revealAtTop(heading.range.location)
             outline.lastEditorScroll = Date()
         }
         if viewMode != .edit { preview.revealHeading(heading.slug, smooth: true) }
+        // After the editor scrolled: its top line may still belong to an earlier heading when the
+        // document ends too soon to bring this one to the top.
+        outline.setCurrentHeading(heading.id)
     }
 
     /// Opens a Markdown document, then scrolls to the heading a link's `#fragment` names.
@@ -330,7 +332,12 @@ extension AppModel {
         let wasOpen = currentFile?.path == link.path
         openPath(link.path, inNewTab: inNewTab)
         guard currentFile?.path == link.path else { return }
-        if viewMode != .read { editor.reveal(link.range, indicator: true, select: true) }
+        if viewMode != .read {
+            // The preview reveals the link's section itself; following the editor would scroll it twice.
+            editor.isScrollingQuietly = viewMode == .split
+            editor.reveal(link.range, indicator: true, select: true)
+            editor.isScrollingQuietly = false
+        }
         if viewMode != .edit, let heading = outline.headings(of: text).last(where: { $0.line <= link.line }) {
             preview.revealHeading(heading.slug, smooth: wasOpen, afterRender: !wasOpen)
         }
@@ -431,20 +438,37 @@ extension AppModel {
 }
 
 extension EditorController {
-    /// Moves the caret to a location and scrolls its line to the top of the editor.
+    /// Moves the caret to a location and scrolls its line to the top of the editor. The preview is
+    /// not scrolled along, since callers reveal the same place in it precisely.
     func revealAtTop(_ location: Int) {
         let length = (textView.string as NSString).length
         let range = NSRange(location: min(max(location, 0), length), length: 0)
+        isScrollingQuietly = true
+        defer { isScrollingQuietly = false }
         textView.setSelectedRange(range)
-        guard let window = textView.window else { textView.scrollRangeToVisible(range); return }
-        let screenRect = textView.firstRect(forCharacterRange: range, actualRange: nil)
-        guard screenRect != .zero else { textView.scrollRangeToVisible(range); return }
-        let rect = textView.convert(window.convertFromScreen(screenRect), from: nil)
+        guard textView.window != nil, let lineTop = lineTop(at: range.location) else {
+            textView.scrollRangeToVisible(range)
+            return
+        }
         let clip = scrollView.contentView
         let top = scrollView.contentInsets.top
         let maxY = max(-top, textView.frame.height - clip.bounds.height)
-        clip.scroll(to: NSPoint(x: 0, y: min(max(rect.minY - top - 12, -top), maxY)))
+        clip.scroll(to: NSPoint(x: 0, y: min(max(lineTop - top - 12, -top), maxY)))
         scrollView.reflectScrolledClipView(clip)
+    }
+
+    /// The top of the line at a location in text view coordinates. The text before it is laid out
+    /// first: estimated heights would put the line too high or too low. (The text view's
+    /// `firstRect` is no help here: it is empty for text outside the visible area.)
+    func lineTop(at location: Int) -> CGFloat? {
+        guard let layout = textView.textLayoutManager, let content = layout.textContentManager else { return nil }
+        let start = layout.documentRange.location
+        guard let target = content.location(start, offsetBy: location),
+              let before = NSTextRange(location: start, end: target) else { return nil }
+        layout.ensureLayout(for: before)
+        guard let fragment = layout.textLayoutFragment(for: target) else { return nil }
+        let lineOffset = fragment.textLineFragment(for: target, isUpstreamAffinity: false)?.typographicBounds.minY ?? 0
+        return textView.textContainerOrigin.y + fragment.layoutFragmentFrame.minY + lineOffset
     }
 
     /// The text location at the top of the visible editor area.

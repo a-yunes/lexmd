@@ -546,4 +546,68 @@ struct OutlineLinkTests {
         #expect(opened.first?.fragment == "target")
         #expect(FileScanner.canonicalPath(opened.first?.path ?? "") == FileScanner.canonicalPath(folder.url.appendingPathComponent("Target.md").path))
     }
+
+    /// One outline click lands on the clicked heading and keeps it current, even when the next
+    /// heading is close below it, and a later scroll of the page hands back to the scroll spy.
+    @Test func smoothRevealKeepsTheClickedHeading() async throws {
+        let preview = PreviewController(allowsRemoteContent: false)
+        var reported: [String] = []
+        preview.onHeadingChange = { reported.append($0) }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = preview.webView
+        defer { window.contentView = nil }
+
+        var html = ""
+        for i in 0..<40 {
+            html += "<h2 id=\"h\(i)\">Heading \(i)</h2>\n" + (i == 20 ? "" : String(repeating: "<p>Text</p>\n", count: 12))
+        }
+        preview.render(html: html, baseURL: nil, resetScroll: true)
+        try await waitUntil { reported.last == "h0" }
+
+        // Heading 21 sits right below heading 20, inside the spy's threshold.
+        preview.revealHeading("h20", smooth: true)
+        let settled = "var y = window.scrollY; return new Promise(function (r) { setTimeout(function () { r(window.scrollY === y ? y : -1); }, 250); })"
+        try await waitUntil { (try await preview.webView.callAsyncJavaScript(settled, arguments: [:], in: nil, contentWorld: .page) as? Double ?? -1) > 0 }
+        try await Task.sleep(for: .milliseconds(1700))
+        let top = try await preview.webView.callAsyncJavaScript(
+            "return document.getElementById('h20').getBoundingClientRect().top", arguments: [:], in: nil, contentWorld: .page
+        ) as? Double
+        #expect(abs((top ?? 999) - 20) < 30)
+        #expect(reported.last == "h20")
+        #expect(!reported.contains("h19") && !reported.contains("h21"))
+        // Edits re-render the page (split view while typing); the page has not moved, so neither does the heading.
+        preview.render(html: html + "<p>More</p>", baseURL: nil, resetScroll: false)
+        try await waitUntil { try await preview.webView.callAsyncJavaScript("return document.getElementById('content').lastElementChild.textContent", arguments: [:], in: nil, contentWorld: .page) as? String == "More" }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(reported.last == "h20")
+
+        // Scrolling away hands control back to the spy.
+        _ = try await preview.webView.callAsyncJavaScript("window.scrollBy(0, 400)", arguments: [:], in: nil, contentWorld: .page)
+        try await waitUntil { reported.last != "h20" }
+        #expect(reported.last?.hasPrefix("h2") == true)
+    }
+
+    /// Revealing a heading far down a long document puts its line at the top of the editor on the
+    /// first try, without scrolling the preview along by fraction.
+    @Test func editorRevealsDistantHeadingAtTop() throws {
+        let editor = EditorController()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = editor.scrollView
+        defer { window.contentView = nil }
+        var source = ""
+        for i in 0..<300 {
+            source += "## Heading \(i)\n\n" + String(repeating: "A line of text that wraps around the editor a few times when it is long enough. ", count: (i % 5) * 3 + 1) + "\n\n- item\n- item\n\n"
+        }
+        editor.load(source)
+        window.layoutIfNeeded()
+        var scrolls = 0
+        editor.onScroll = { _ in scrolls += 1 }
+        let headings = DocumentStructure.analyze(source).headings
+        for index in [250, 120, 280] {
+            editor.revealAtTop(headings[index].range.location)
+            let top = editor.topVisibleLocation()
+            #expect(headings.last { $0.range.location <= top }?.title == "Heading \(index)")
+        }
+        #expect(scrolls == 0)
+    }
 }
