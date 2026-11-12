@@ -18,6 +18,8 @@ struct FileNode: Identifiable, Hashable, Sendable {
 struct TreeRow: Identifiable {
     let node: FileNode
     let depth: Int
+    /// Whether a folder row shows its children.
+    var isExpanded = false
     var id: String { node.id }
 }
 
@@ -82,7 +84,8 @@ enum FileScanner {
         for item in items {
             let name = item.lastPathComponent
             let values = try? item.resourceValues(forKeys: Set(keys))
-            let url = URL(fileURLWithPath: item.path)
+            // Passing isDirectory avoids a file system check per directory entry.
+            let url = URL(fileURLWithPath: item.path, isDirectory: values?.isDirectory == true)
             if values?.isSymbolicLink == true {
                 // Follow symlinked documents, but never symlinked folders (avoids cycles).
                 var isDir: ObjCBool = false
@@ -147,8 +150,75 @@ enum FileScanner {
                 copy.children = kept
                 return copy
             }
-            return node.searchLabel.localizedStandardContains(query) ? node : nil
+            let label = node.parents.isEmpty ? node.name : node.searchLabel
+            return label.localizedStandardContains(query) ? node : nil
         }
+    }
+
+    /// The tree flattened into sidebar rows. A non-empty `query` filters the tree and shows
+    /// every folder expanded; otherwise folders in `expanded` show their children.
+    static func rows(_ nodes: [FileNode], query: String, expanded: Set<String>) -> [TreeRow] {
+        let filtering = !query.isEmpty
+        var rows: [TreeRow] = []
+        func walk(_ nodes: [FileNode], depth: Int) {
+            for node in nodes {
+                let open = node.children != nil && (filtering || expanded.contains(node.id))
+                rows.append(TreeRow(node: node, depth: depth, isExpanded: open))
+                if open, let children = node.children { walk(children, depth: depth + 1) }
+            }
+        }
+        walk(filtering ? filter(nodes, query: query) : nodes, depth: 0)
+        return rows
+    }
+
+    /// Paths of the files and folders in a tree.
+    static func paths(in nodes: [FileNode]) -> (files: Set<String>, folders: Set<String>) {
+        var files: Set<String> = []
+        var folders: Set<String> = []
+        func walk(_ list: [FileNode]) {
+            for node in list {
+                if let children = node.children {
+                    folders.insert(node.id)
+                    walk(children)
+                } else {
+                    files.insert(node.id)
+                }
+            }
+        }
+        walk(nodes)
+        return (files, folders)
+    }
+
+    /// Flags that may mean an item appeared, disappeared, or moved.
+    static let structuralFlags = kFSEventStreamEventFlagItemCreated | kFSEventStreamEventFlagItemRemoved
+        | kFSEventStreamEventFlagItemRenamed
+    private static let libraryPath = FileManager.default.homeDirectoryForCurrentUser.path + "/Library"
+    /// Flags that mean the stream lost track of individual changes.
+    static let rescanFlags = kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagRootChanged
+
+    /// Whether a file system event can change the scanned tree. FSEvents combines the flags of
+    /// changes to the same item, and atomic saves rename files over themselves, so a save can
+    /// carry created or renamed flags; a Markdown file therefore counts only when its presence
+    /// on disk differs from the tree. A new folder starts empty (files created in it report
+    /// their own events); a folder moved in, or one in the tree that disappeared, counts.
+    /// `paths` is called only for events that need it.
+    static func eventChangesTree(
+        path: String, flags: FSEventStreamEventFlags, root: String,
+        paths: () -> (files: Set<String>, folders: Set<String>),
+        exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> Bool {
+        let path = path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
+        // Like the scan, skip ignored folders and ~/Library, whose caches change constantly.
+        guard !isIgnored(path, root: root), path != libraryPath, !path.hasPrefix(libraryPath + "/") else { return false }
+        let flags = Int(flags)
+        if flags & rescanFlags != 0 { return true }
+        guard flags & structuralFlags != 0 else { return false }
+        if flags & kFSEventStreamEventFlagItemIsDir != 0 {
+            if flags & kFSEventStreamEventFlagItemRenamed != 0 { return true }
+            return paths().folders.contains(path) && !exists(path)
+        }
+        guard isMarkdown(path: path) else { return false }
+        return paths().files.contains(path) != exists(path)
     }
 
     /// Merges folders that hold a single item into that item, so `docs/guide/README.md`

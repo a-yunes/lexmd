@@ -204,7 +204,9 @@ enum QuickSearchEngine {
         let compact = query.replacingOccurrences(of: " ", with: "")
         guard !compact.isEmpty else { return [] }
         var matches: [FileMatch] = []
-        for file in files {
+        for (index, file) in files.enumerated() {
+            // A newer query supersedes this one; stop instead of finishing the whole project.
+            if index % 256 == 0, Task.isCancelled { break }
             let base = (file.name as NSString).deletingPathExtension
             // A query that includes the extension ("readme.md") matches the full name.
             let nameMatch = fuzzy(compact, in: base) ?? fuzzy(compact, in: file.name)
@@ -230,6 +232,13 @@ enum QuickSearchEngine {
         let original = Array(candidate)
         let lower = original.map { Character($0.lowercased().first.map(String.init) ?? String($0)) }
         guard !q.isEmpty, q.count <= lower.count else { return nil }
+        // Both passes below need every query character in order, so most candidates end here.
+        var next = 0
+        for character in lower where character == q[next] {
+            next += 1
+            if next == q.count { break }
+        }
+        guard next == q.count else { return nil }
 
         func isWordStart(_ i: Int) -> Bool {
             if i == 0 { return true }
@@ -240,7 +249,7 @@ enum QuickSearchEngine {
         // 1. Contiguous substring, preferring one that starts a word.
         var best: (Int, Int)?
         if q.count <= lower.count {
-            for start in 0...(lower.count - q.count) where Array(lower[start..<(start + q.count)]) == q {
+            for start in 0...(lower.count - q.count) where lower[start..<(start + q.count)].elementsEqual(q) {
                 let score = 12 * q.count + (start == 0 ? 25 : 0) + (isWordStart(start) ? 12 : 0) - lower.count / 10
                 if best == nil || score > best!.1 { best = (start, score) }
             }

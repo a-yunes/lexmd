@@ -149,8 +149,8 @@ struct FindBar: View {
             Divider().frame(height: 18)
             OptionToggle(title: "Aa", help: "Match Case", isOn: $model.findCaseSensitive)
             HStack(spacing: 2) {
-                BarIconButton(symbol: "chevron.up", help: "Previous Match (⇧⌘G)") { model.findNext(false) }
-                BarIconButton(symbol: "chevron.down", help: "Next Match (⌘G)") { model.findNext(true) }
+                BarIconButton(symbol: "chevron.up", help: model.helpText("Previous Match", .findPrevious)) { model.findNext(false) }
+                BarIconButton(symbol: "chevron.down", help: model.helpText("Next Match", .findNext)) { model.findNext(true) }
             }
             .disabled(model.findCount == 0)
             BarIconButton(symbol: "xmark", help: "Close (esc)") { model.closeFindBar() }
@@ -381,7 +381,6 @@ private struct QuickResultsList: View {
                         SectionTitle(title: model.quickMode == .files && model.quickQuery.trimmingCharacters(in: .whitespaces).isEmpty ? "Recent" : "Files")
                         ForEach(Array(results.files.enumerated()), id: \.element.id) { index, file in
                             QuickFileRow(file: file, isSelected: model.quickSelection == index)
-                                .id(index)
                                 .onTapGesture { model.activateQuickItem(at: index) }
                         }
                     }
@@ -392,7 +391,6 @@ private struct QuickResultsList: View {
                                 QuickFileHeader(hit: hit, count: results.hitCounts[hit.path] ?? 0)
                             }
                             QuickHitRow(hit: hit, isSelected: model.quickSelection == fileOffset + index)
-                                .id(fileOffset + index)
                                 .onTapGesture { model.activateQuickItem(at: fileOffset + index) }
                         }
                     }
@@ -400,8 +398,15 @@ private struct QuickResultsList: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
             }
+            // Each new set of results gets a fresh list, scrolled to the top, so no rows or
+            // scroll position carry over from an earlier query.
+            .id(model.quickResultsGeneration)
             .onChange(of: model.quickSelection) { _, selection in
-                proxy.scrollTo(selection)
+                switch model.quickItem(at: selection) {
+                case .file(let file): proxy.scrollTo(file.id)
+                case .hit(let hit): proxy.scrollTo(hit.id)
+                case nil: break
+                }
             }
         }
     }

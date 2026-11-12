@@ -65,3 +65,30 @@ struct OpenQuicklyNameTests {
         #expect(QuickSearchEngine.fuzzyFiles(query: "docs/guide.markdown", files: files).first?.path == "/p/docs/guide.markdown")
     }
 }
+
+struct FuzzyMatchTests {
+    @Test func scatteredAndContiguousMatchesStillScore() {
+        #expect(QuickSearchEngine.fuzzy("skrev", in: "Sketches/rough-Review") != nil)
+        #expect(QuickSearchEngine.fuzzy("guide", in: "User Guide")?.1 == [5, 6, 7, 8, 9])
+        #expect(QuickSearchEngine.fuzzy("xyz", in: "README") == nil)
+        #expect(QuickSearchEngine.fuzzy("emdaer", in: "README") == nil, "letters out of order never match")
+    }
+
+    @Test func fileMatchingStopsWhenSuperseded() async {
+        let files = (0..<20_000).map { SearchableFile(path: "/p/note\($0).md", name: "note\($0).md", folder: "") }
+        let task = Task.detached { () -> [FileMatch] in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return QuickSearchEngine.fuzzyFiles(query: "note", files: files, limit: 60)
+        }
+        #expect(await task.value.isEmpty)
+        #expect(QuickSearchEngine.fuzzyFiles(query: "note1", files: files, limit: 5).count == 5)
+    }
+
+    @Test func previewLinesMatchSplittingTheWholeText() {
+        for text in ["", "one", "one\n", "a\r\nb\r\n\nc", "\n\n\n", "x\ny\nz\nw"] {
+            for count in [1, 2, 3, 10] {
+                #expect(AppModel.lines(of: text, count: count) == Array(text.components(separatedBy: "\n").prefix(count)))
+            }
+        }
+    }
+}

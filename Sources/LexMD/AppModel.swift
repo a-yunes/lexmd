@@ -26,17 +26,37 @@ final class AppModel {
     private(set) var rootURL: URL?
     var tree: [FileNode] = [] {
         didSet {
+            treeGeneration &+= 1
+            treePaths = nil
+            searchFiles = nil
             updateDisplayTree()
             linksTreeDidChange()
         }
     }
     /// The tree as displayed: compacted when the setting is on, before filtering.
-    private(set) var displayTree: [FileNode] = []
+    private(set) var displayTree: [FileNode] = [] {
+        didSet { updateVisibleRows() }
+    }
     private(set) var displayFolderIDs: [String] = []
+    /// The displayed tree flattened into sidebar rows, honoring the filter and folder expansion.
+    private(set) var visibleRows: [TreeRow] = []
     private(set) var isScanning = false
-    var filter = ""
+    var filter = "" {
+        didSet {
+            guard filter != oldValue else { return }
+            let filtering = !filter.trimmingCharacters(in: .whitespaces).isEmpty
+            if filtering != isFiltering { isFiltering = filtering }
+            updateVisibleRows()
+        }
+    }
+    /// Whether the filter holds text. Views and menus read this instead of `filter` so they
+    /// update only when filtering starts or stops, not on every keystroke.
+    private(set) var isFiltering = false
     var expanded: Set<String> = [] {
-        didSet { defaults.set(Array(expanded), forKey: Keys.expanded) }
+        didSet {
+            defaults.set(Array(expanded), forKey: Keys.expanded)
+            if !isFiltering { updateVisibleRows() }
+        }
     }
 
     /// Path of the file highlighted in the sidebar.
@@ -134,7 +154,11 @@ final class AppModel {
     var quickOptions = SearchOptions() {
         didSet { if quickOptions != oldValue { scheduleQuickSearch() } }
     }
-    var quickResults = QuickSearchResults()
+    var quickResults = QuickSearchResults() {
+        didSet { quickResultsGeneration &+= 1 }
+    }
+    /// Changes with every new set of results, so the list starts over at the top.
+    private(set) var quickResultsGeneration = 0
     var isQuickSearching = false
     var quickSelection = 0
     var quickPreview: QuickPreviewData?
@@ -168,6 +192,14 @@ final class AppModel {
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var renderTask: Task<Void, Never>?
     @ObservationIgnored private var scanTask: Task<Void, Never>?
+    @ObservationIgnored private var scanRoot: URL?
+    @ObservationIgnored private var rescanAfterScan = false
+    /// Changes whenever `tree` is set, so work started on an older tree can tell.
+    @ObservationIgnored private(set) var treeGeneration = 0
+    @ObservationIgnored private var treePaths: (files: Set<String>, folders: Set<String>)?
+    /// Open Quickly and Find in Files candidates for the current tree, built off the main thread.
+    @ObservationIgnored var searchFiles: [SearchableFile]?
+    @ObservationIgnored var quickPendingActivation: Bool?
     @ObservationIgnored private var rescanTask: Task<Void, Never>?
     @ObservationIgnored private var watcher: DirectoryWatcher?
     @ObservationIgnored private var pendingScrollReset = false
@@ -266,29 +298,12 @@ final class AppModel {
         displayFolderIDs = FileScanner.folderIDs(in: displayTree)
     }
 
-    var visibleTree: [FileNode] {
-        let query = filter.trimmingCharacters(in: .whitespaces)
-        guard !query.isEmpty else { return displayTree }
-        return FileScanner.filter(displayTree, query: query)
-    }
-
-    /// The visible tree flattened into rows, honoring folder expansion.
-    var visibleRows: [TreeRow] {
-        var rows: [TreeRow] = []
-        func walk(_ nodes: [FileNode], depth: Int) {
-            for node in nodes {
-                rows.append(TreeRow(node: node, depth: depth))
-                if let children = node.children, isExpanded(node) {
-                    walk(children, depth: depth + 1)
-                }
-            }
-        }
-        walk(visibleTree, depth: 0)
-        return rows
+    private func updateVisibleRows() {
+        visibleRows = FileScanner.rows(displayTree, query: filter.trimmingCharacters(in: .whitespaces), expanded: expanded)
     }
 
     func isExpanded(_ node: FileNode) -> Bool {
-        !filter.trimmingCharacters(in: .whitespaces).isEmpty || expanded.contains(node.id)
+        isFiltering || expanded.contains(node.id)
     }
 
     func setExpanded(_ node: FileNode, _ value: Bool) {
@@ -298,7 +313,7 @@ final class AppModel {
     /// The expand/collapse-all control only makes sense with at least two folders on screen,
     /// and not while filtering (filter results are always fully expanded).
     var canToggleAllFolders: Bool {
-        filter.trimmingCharacters(in: .whitespaces).isEmpty && displayFolderIDs.count >= 2
+        !isFiltering && displayFolderIDs.count >= 2
     }
 
     var allFoldersExpanded: Bool {
@@ -410,13 +425,27 @@ final class AppModel {
     func rescan() {
         guard let root = rootURL else { return }
         isScanning = tree.isEmpty
+        if scanTask != nil, scanRoot == root {
+            // Restarting would let a steady stream of changes in a large project keep the
+            // scan from ever finishing; scan again once this one ends instead.
+            rescanAfterScan = true
+            return
+        }
         scanTask?.cancel()
+        scanRoot = root
+        rescanAfterScan = false
+        let generation = treeGeneration
         scanTask = Task { [weak self] in
             let nodes = await runDetached { FileScanner.scan(root) }
             guard let self, !Task.isCancelled, self.rootURL == root else { return }
+            self.scanTask = nil
+            // A file command edited the tree while this scan ran, so the result may be older
+            // than what the sidebar shows.
+            guard self.treeGeneration == generation else { self.rescan(); return }
             if nodes != self.tree { self.tree = nodes }
             self.isScanning = false
             self.gitProjectScanned()
+            if self.rescanAfterScan { self.rescan() }
         }
     }
 
@@ -436,16 +465,15 @@ final class AppModel {
         var structural = false
         var currentChanged = false
         let current = currentFile?.path
-        let structuralMask = kFSEventStreamEventFlagItemCreated | kFSEventStreamEventFlagItemRemoved
-            | kFSEventStreamEventFlagItemRenamed | kFSEventStreamEventFlagMustScanSubDirs
-            | kFSEventStreamEventFlagRootChanged
+        let paths = { [self] in
+            if let treePaths { return treePaths }
+            let built = FileScanner.paths(in: tree)
+            treePaths = built
+            return built
+        }
         for event in events {
             if event.path == current { currentChanged = true }
-            guard !FileScanner.isIgnored(event.path, root: root) else { continue }
-            let flags = Int(event.flags)
-            guard flags & structuralMask != 0 else { continue }
-            let isDir = flags & kFSEventStreamEventFlagItemIsDir != 0
-            if isDir || FileScanner.isMarkdown(path: event.path) || flags & kFSEventStreamEventFlagMustScanSubDirs != 0 {
+            if !structural, FileScanner.eventChangesTree(path: event.path, flags: event.flags, root: root, paths: paths) {
                 structural = true
             }
         }
