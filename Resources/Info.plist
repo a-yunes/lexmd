@@ -137,5 +137,18 @@
 			</dict>
 		</dict>
 	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>io.github.a-yunes.lexmd.document-tab</string>
+			<key>UTTypeDescription</key>
+			<string>LexMD Document Tab</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

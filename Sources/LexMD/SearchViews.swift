@@ -119,10 +119,10 @@ private func highlighted(_ text: String, _ range: NSRange?, matchFont: Font, mat
 
 // MARK: - Find bar
 
-/// Floating find bar for the open document, styled to match the Find in Files panel.
+/// Floating find bar for the open document, on the same Liquid Glass as the Find in Files panel.
 struct FindBar: View {
     @Environment(AppModel.self) private var model
-    private let shape = RoundedRectangle(cornerRadius: 13, style: .continuous)
+    private let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
 
     var body: some View {
         @Bindable var model = model
@@ -158,10 +158,8 @@ struct FindBar: View {
         .padding(.leading, 14)
         .padding(.trailing, 8)
         .frame(height: 44)
-        .background(shape.fill(.regularMaterial))
-        .overlay(shape.strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.16), radius: 18, y: 8)
-        .shadow(color: .black.opacity(0.06), radius: 1.5, y: 0.5)
+        // System glass draws its own edge and shadow.
+        .glassEffect(.regular, in: shape)
     }
 
     private var countLabel: String {
@@ -222,7 +220,7 @@ struct QuickSearchOverlay: View {
 
 struct QuickSearchPanel: View {
     @Environment(AppModel.self) private var model
-    private let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+    private let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
 
     var body: some View {
         VStack(spacing: 0) {
@@ -236,15 +234,9 @@ struct QuickSearchPanel: View {
             Divider().opacity(0.6)
             footer
         }
-        .background(panelBackground)
         .clipShape(shape)
-        .overlay(shape.strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.22), radius: 36, y: 16)
-        .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
-    }
-
-    @ViewBuilder private var panelBackground: some View {
-        shape.fill(.regularMaterial)
+        // System glass draws its own edge and shadow.
+        .glassEffect(.regular, in: shape)
     }
 
     private var searchField: some View {

@@ -211,7 +211,7 @@ struct CommitToolbarButton: View {
         Button { model.showCommitSheet() } label: {
             Label("Commit…", systemImage: "checkmark.circle")
         }
-        .help("Commit changes \(model.shortcut(for: .commit).map { "(\($0.display))" } ?? "")")
+        .help(model.helpText("Commit changes", .commit))
     }
 }
 
@@ -253,6 +253,7 @@ struct GitKindLabel: View {
 struct CommitSheet: View {
     @Bindable var session: CommitSession
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.sheetHeightLimit) private var heightLimit
     @FocusState private var summaryFocused: Bool
 
     var body: some View {
@@ -273,7 +274,11 @@ struct CommitSheet: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
         }
-        .frame(minWidth: 780, idealWidth: 920, minHeight: 560, idealHeight: 700)
+        // Never larger than the window it is on, down to the window's minimum size.
+        .frame(
+            minWidth: WindowLayout.minWidth - 40, idealWidth: 920,
+            minHeight: min(460, heightLimit), idealHeight: min(700, heightLimit), maxHeight: heightLimit
+        )
         .onAppear { summaryFocused = true }
     }
 

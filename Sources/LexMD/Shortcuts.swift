@@ -123,7 +123,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case exportPDF, exportHTML, printDocument, copyRichText
     case toggleOutline
     case installCommandLineTool
-    case renameInSidebar, trashInSidebar
+    case renameInSidebar, trashInSidebar, quickLookInSidebar
 
     var id: String { rawValue }
 
@@ -148,7 +148,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .commit: .sourceControl
         case .exportPDF, .exportHTML, .printDocument, .copyRichText: .file
         case .installCommandLineTool: .file
-        case .renameInSidebar, .trashInSidebar: .sidebar
+        case .renameInSidebar, .trashInSidebar, .quickLookInSidebar: .sidebar
         }
     }
 
@@ -200,6 +200,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .installCommandLineTool: "Install Command Line Tool…"
         case .renameInSidebar: "Rename in Sidebar"
         case .trashInSidebar: "Move to Trash in Sidebar"
+        case .quickLookInSidebar: "Quick Look in Sidebar"
         }
     }
 
@@ -255,6 +256,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .installCommandLineTool: ""
         case .renameInSidebar: "return"
         case .trashInSidebar: "cmd+delete"
+        case .quickLookInSidebar: "space"
         }
         return Shortcut(string: value)
     }

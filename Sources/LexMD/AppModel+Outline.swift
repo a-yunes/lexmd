@@ -226,15 +226,33 @@ extension AppModel {
     }
 
     /// The panel shows when the reader wants it and the document has something to show; the
-    /// preference is kept for documents that do.
-    var showsOutlinePanel: Bool { isOutlineVisible && canShowOutline }
+    /// preference is kept for documents that do. It steps aside while the window is too narrow,
+    /// unless the reader asked for it there.
+    var showsOutlinePanel: Bool {
+        isOutlineVisible && canShowOutline && (outlineFitsWindow || showsOutlineWhileNarrow)
+    }
 
     /// Show/Hide Outline is available only for documents with an outline, backlinks, or problems.
     var canShowOutline: Bool { currentFile != nil && outline.hasContent }
 
     func toggleOutline() {
         guard canShowOutline else { NSSound.beep(); return }
-        withAnimation(.snappy(duration: 0.25)) { isOutlineVisible.toggle() }
+        withAnimation(.snappy(duration: 0.25)) { setOutlineShown(!showsOutlinePanel) }
+    }
+
+    /// Shows or hides the panel as the reader sees it, including in a narrow window.
+    func setOutlineShown(_ shown: Bool) {
+        isOutlineVisible = shown
+        showsOutlineWhileNarrow = shown && !outlineFitsWindow
+    }
+
+    /// Recomputes whether the outline fits beside the document at the current window width.
+    func updateOutlineFit() {
+        let sidebarVisible = sidebarPosition == .right ? isInspectorPresented : columnVisibility != .detailOnly
+        let fits = OutlineLayout.fits(windowWidth: windowWidth, sidebarVisible: sidebarVisible, mode: viewMode)
+        guard fits != outlineFitsWindow else { return }
+        outlineFitsWindow = fits
+        if fits { showsOutlineWhileNarrow = false }
     }
 
     func outlineVisibilityChanged() {

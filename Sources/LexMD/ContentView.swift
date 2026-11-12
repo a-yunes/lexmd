@@ -1,8 +1,21 @@
 import AppKit
 import SwiftUI
 
+/// The window's minimum content size. Sheets on the window stay within it, and the outline
+/// steps aside when the window is too narrow for it (see `OutlineLayout`).
+enum WindowLayout {
+    static let minWidth: CGFloat = 800
+    static let minHeight: CGFloat = 540
+}
+
+extension EnvironmentValues {
+    /// The tallest a sheet on the window can be and still fit inside it.
+    @Entry var sheetHeightLimit: CGFloat = .infinity
+}
+
 struct ContentView: View {
     @Environment(AppModel.self) private var model
+    @State private var sheetHeightLimit: CGFloat = .infinity
 
     var body: some View {
         @Bindable var model = model
@@ -24,6 +37,12 @@ struct ContentView: View {
             }
         }
         .toolbar(removing: .title)
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+            model.windowWidth = size.width
+            // Whole steps, so resizing the window does not resize sheets on every frame.
+            let limit = max(320, ((size.height - 24) / 20).rounded(.down) * 20)
+            if limit != sheetHeightLimit { sheetHeightLimit = limit }
+        }
         .overlay {
             if model.isQuickSearchVisible {
                 QuickSearchOverlay()
@@ -37,6 +56,7 @@ struct ContentView: View {
         .sheet(isPresented: $model.isOnboardingPresented) {
             OnboardingView()
                 .environment(model)
+                .environment(\.sheetHeightLimit, sheetHeightLimit)
                 .interactiveDismissDisabled()
         }
         .task {
@@ -45,11 +65,15 @@ struct ContentView: View {
             model.presentOnboardingIfNeeded()
         }
         .dropDestination(for: URL.self) { urls, _ in
+            // A tab dropped outside the tab bar ends its reordering drag.
+            model.tabStore.draggingID = nil
             guard let url = urls.first(where: \.isFileURL) else { return false }
             model.open(url)
             return true
         }
         .modifier(CommitSheetPresenter())
+        // Outside the sheet modifiers, so the sheets they present read it.
+        .environment(\.sheetHeightLimit, sheetHeightLimit)
     }
 }
 
@@ -62,61 +86,111 @@ private struct DetailColumn: View {
     var body: some View {
         DetailView()
             .outlinePanel(trailingSidebar ? .leading : .trailing)
-            .toolbar { detailToolbar(trailingSidebar: trailingSidebar) }
+            .toolbar(id: ToolbarID.main) { detailToolbar(trailingSidebar: trailingSidebar) }
             .navigationTitle(model.title)
+            .background { WindowDocumentBridge(url: model.currentFile) }
     }
 
     @ToolbarContentBuilder
-    func detailToolbar(trailingSidebar: Bool) -> some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
+    func detailToolbar(trailingSidebar: Bool) -> some CustomizableToolbarContent {
+        ToolbarItem(id: ToolbarID.title, placement: .navigation) {
             DocumentTitle()
         }
+        .customizationBehavior(.disabled)
+        .sharedBackgroundVisibility(.hidden)
         ToolbarSpacer(.flexible)
         if model.showsCommitButton {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(id: ToolbarID.commit, placement: .primaryAction) {
                 CommitToolbarButton()
             }
         }
-        ToolbarItem(placement: .primaryAction) {
+        ToolbarItem(id: ToolbarID.viewMode, placement: .primaryAction) {
             ViewModePicker()
         }
         if model.canShowOutline {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(id: ToolbarID.outline, placement: .primaryAction) {
                 OutlineToolbarButton()
             }
         }
         if trailingSidebar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(id: ToolbarID.trailingSidebar, placement: .primaryAction) {
+                let title = model.isInspectorPresented ? "Hide Sidebar" : "Show Sidebar"
                 Button { model.toggleSidebar() } label: {
-                    Label(model.isInspectorPresented ? "Hide Sidebar" : "Show Sidebar", systemImage: "sidebar.trailing")
+                    Label(title, systemImage: "sidebar.trailing")
                 }
-                .help("Show or hide the sidebar \(model.shortcut(for: .toggleSidebar).map { "(\($0.display))" } ?? "")")
+                .help(model.helpText(title, .toggleSidebar))
             }
         }
     }
 }
 
+/// Stable identifiers, so Customize Toolbar can save where the reader puts each item.
+enum ToolbarID {
+    static let main = "lexmd.toolbar"
+    static let title = "lexmd.title"
+    static let commit = "lexmd.commit"
+    static let viewMode = "lexmd.viewMode"
+    static let outline = "lexmd.outline"
+    static let trailingSidebar = "lexmd.trailingSidebar"
+    static let expandAll = "lexmd.expandAll"
+    static let findInFiles = "lexmd.findInFiles"
+    static let open = "lexmd.open"
+}
+
 /// Window title and subtitle drawn by SwiftUI so the subtitle always gets its full width
 /// as the word count changes.
+/// The system title is hidden, so this view also carries the document's proxy icon and the
+/// path menu on its title.
 struct DocumentTitle: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(model.title)
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(1)
-            if !model.subtitle.isEmpty {
-                Text(model.subtitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+        HStack(spacing: 6) {
+            if let url = model.currentFile {
+                DocumentProxyIcon(url: url)
+                    .frame(width: 16, height: 16)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(model.title)
+                    .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
+                if !model.subtitle.isEmpty {
+                    Text(model.subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .contextMenu {
+                if let url = model.currentFile {
+                    DocumentPathMenuItems(url: url)
+                }
             }
         }
         .fixedSize()
         .padding(.horizontal, 6)
-        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The document and the folders that contain it; choosing one shows it in Finder.
+private struct DocumentPathMenuItems: View {
+    let url: URL
+
+    var body: some View {
+        let components = DocumentPath.components(of: url)
+        ForEach(Array(components.enumerated()), id: \.offset) { index, component in
+            Button {
+                DocumentPath.reveal(index, of: components)
+            } label: {
+                Label {
+                    Text(DocumentPath.displayName(of: component))
+                } icon: {
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: component.path))
+                }
+            }
+        }
     }
 }
 
@@ -125,16 +199,36 @@ struct ViewModePicker: View {
 
     var body: some View {
         Picker("View Mode", selection: Binding(get: { model.viewMode }, set: { model.setViewMode($0) })) {
-            Label("Preview", systemImage: "doc.richtext").tag(ViewMode.read)
-            Label("Preview and Editor", systemImage: "rectangle.split.2x1").tag(ViewMode.split)
-            Label("Editor", systemImage: "square.and.pencil").tag(ViewMode.edit)
+            ForEach(ViewMode.pickerOrder, id: \.self) { mode in
+                Label(mode.command.title, systemImage: mode.symbol).tag(mode)
+            }
         }
         .pickerStyle(.segmented)
         .labelStyle(.iconOnly)
-        .help([("Preview", ShortcutAction.previewOnly), ("Split", .split), ("Editor", .editorOnly)]
-            .map { "\($0.0) \(model.shortcut(for: $0.1)?.display ?? "")" }
-            .joined(separator: " · "))
+        .help(ViewMode.pickerOrder.map { model.helpText($0.command.title, $0.command) }.joined(separator: ", "))
         .disabled(model.currentFile == nil)
+    }
+}
+
+extension ViewMode {
+    /// The order of the view mode control, as in the View menu.
+    static let pickerOrder: [ViewMode] = [.read, .split, .edit]
+
+    /// The menu command that switches to this mode; its title names the mode everywhere.
+    var command: ShortcutAction {
+        switch self {
+        case .read: .previewOnly
+        case .split: .split
+        case .edit: .editorOnly
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .read: "doc.richtext"
+        case .split: "rectangle.split.2x1"
+        case .edit: "square.and.pencil"
+        }
     }
 }
 
@@ -178,7 +272,15 @@ struct SidebarView: View {
                         model.confirmMoveToTrash(URL(fileURLWithPath: path))
                         return .handled
                     }
+                    if press.phase == .down, model.sidebarFiles.renamingPath == nil,
+                       model.shortcut(for: .quickLookInSidebar)?.matches(press.key, modifiers: press.modifiers) == true {
+                        SidebarQuickLook.shared.toggle(URL(fileURLWithPath: path))
+                        return .handled
+                    }
                     return .ignored
+                }
+                .onChange(of: model.selectedPath) { _, path in
+                    SidebarQuickLook.shared.selectionChanged(to: path)
                 }
                 .overlay {
                     if rows.isEmpty, !model.isScanning {
@@ -206,24 +308,24 @@ struct SidebarView: View {
             }
         }
         .modifier(SidebarFilter(inInspector: inInspector, text: $model.filter))
-        .toolbar {
+        .toolbar(id: ToolbarID.main) {
             if model.canToggleAllFolders {
-                ToolbarItem {
+                ToolbarItem(id: ToolbarID.expandAll) {
                     ExpandAllButton()
                 }
             }
-            ToolbarItem {
+            ToolbarItem(id: ToolbarID.findInFiles) {
                 Button { model.toggleQuickSearch(mode: .everything) } label: {
                     Label("Find in Files", systemImage: "magnifyingglass")
                 }
-                .help("Find in Files \(model.shortcut(for: .findInFiles).map { "(\($0.display))" } ?? "")")
+                .help(model.helpText("Find in Files", .findInFiles))
                 .disabled(model.rootURL == nil)
             }
-            ToolbarItem {
+            ToolbarItem(id: ToolbarID.open) {
                 Button { model.showOpenPanel() } label: {
-                    Label("Open Folder", systemImage: "folder.badge.plus")
+                    Label(ShortcutAction.open.title, systemImage: "folder")
                 }
-                .help("Open a folder or Markdown file \(model.shortcut(for: .open).map { "(\($0.display))" } ?? "")")
+                .help(model.helpText("Open a folder or Markdown file", .open))
             }
         }
     }
@@ -370,6 +472,9 @@ struct RowMenu: View {
 
     var body: some View {
         FileActionMenuItems(url: url)
+        if !url.hasDirectoryPath {
+            Button("Quick Look") { SidebarQuickLook.shared.toggle(url) }
+        }
         Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         Button("Copy Path") {
             NSPasteboard.general.clearContents()
@@ -397,7 +502,9 @@ struct DetailView: View {
                 }
             }
             .animation(.easeOut(duration: 0.16), value: model.isFindBarVisible)
-            .safeAreaInset(edge: .top, spacing: 0) { DocumentTabBar() }
+            // A system bar under the toolbar, with the scroll edge treatment instead of its own
+            // background and divider.
+            .safeAreaBar(edge: .top, spacing: 0) { DocumentTabBar() }
     }
 
     private var documentArea: some View {

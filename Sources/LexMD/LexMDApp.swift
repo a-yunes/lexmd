@@ -15,7 +15,7 @@ struct LexMDApp: App {
         Window("LexMD", id: "main") {
             ContentView()
                 .environment(model)
-                .frame(minWidth: 760, minHeight: 480)
+                .frame(minWidth: WindowLayout.minWidth, minHeight: WindowLayout.minHeight)
         }
         .defaultSize(width: 1380, height: 880)
         .windowToolbarStyle(.unified)

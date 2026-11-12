@@ -13,7 +13,47 @@ struct OnboardingView: View {
         case welcome, folder, finish
     }
 
+    @Environment(\.sheetHeightLimit) private var heightLimit
+
     var body: some View {
+        VStack(spacing: 24) {
+            // In a short window the step scrolls and the buttons stay in view.
+            ViewThatFits(in: .vertical) {
+                stepContent
+                ScrollView { stepContent }
+                    .scrollBounceBehavior(.basedOnSize)
+            }
+
+            Spacer(minLength: 0)
+
+            HStack {
+                if step != .welcome {
+                    Button("Back") { withAnimation(.snappy) { step = Step(rawValue: step.rawValue - 1) ?? .welcome } }
+                } else {
+                    Button("Skip") { model.completeOnboarding() }
+                        .keyboardShortcut(.cancelAction)
+                }
+                Spacer()
+                Button(step == .finish ? "Start Reading" : "Continue") {
+                    if let next = Step(rawValue: step.rawValue + 1) {
+                        withAnimation(.snappy) { step = next }
+                    } else {
+                        model.completeOnboarding()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(40)
+        .frame(width: 540, height: min(600, heightLimit))
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            isDefaultApp = MarkdownDefaultApp.isLexMD
+        }
+    }
+
+    private var stepContent: some View {
         VStack(spacing: 24) {
             HStack(spacing: 6) {
                 ForEach(Step.allCases, id: \.rawValue) { item in
@@ -41,33 +81,6 @@ struct OnboardingView: View {
 
             content
                 .frame(maxWidth: .infinity, minHeight: 150)
-
-            Spacer(minLength: 0)
-
-            HStack {
-                if step != .welcome {
-                    Button("Back") { withAnimation(.snappy) { step = Step(rawValue: step.rawValue - 1) ?? .welcome } }
-                } else {
-                    Button("Skip") { model.completeOnboarding() }
-                        .keyboardShortcut(.cancelAction)
-                }
-                Spacer()
-                Button(step == .finish ? "Start Reading" : "Continue") {
-                    if let next = Step(rawValue: step.rawValue + 1) {
-                        withAnimation(.snappy) { step = next }
-                    } else {
-                        model.completeOnboarding()
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(40)
-        .frame(width: 540, height: 600)
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            isDefaultApp = MarkdownDefaultApp.isLexMD
         }
     }
 

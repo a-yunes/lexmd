@@ -184,36 +184,74 @@ private struct SectionHeader: View {
     }
 }
 
-/// Places the outline panel beside the document: trailing when the file tree is on the left,
-/// leading when it is on the right.
+/// The outline's widths, and when the window has room for it beside the document.
+enum OutlineLayout {
+    static let minWidth: CGFloat = 190
+    static let idealWidth: CGFloat = 260
+    static let maxWidth: CGFloat = 440
+    /// The narrowest the file tree gets.
+    static let sidebarMinWidth: CGFloat = 210
+    /// Keyboard and VoiceOver resizing steps.
+    static let widthStep: CGFloat = 20
+
+    /// The narrowest the document gets: one pane, or the editor and preview side by side.
+    static func documentMinWidth(_ mode: ViewMode) -> CGFloat {
+        mode == .split ? 520 : 360
+    }
+
+    static func fits(windowWidth: CGFloat, sidebarVisible: Bool, mode: ViewMode) -> Bool {
+        windowWidth >= (sidebarVisible ? sidebarMinWidth : 0) + documentMinWidth(mode) + minWidth
+    }
+
+    static func clampedWidth(_ width: CGFloat) -> CGFloat {
+        min(max(width, minWidth), maxWidth)
+    }
+}
+
+/// Places the outline beside the document. With the file tree on the left it is the window's
+/// inspector, which the system sizes, remembers and makes resizable from the keyboard. With
+/// the file tree in the inspector on the right, it is a panel on the leading side.
 private struct OutlinePlacement: ViewModifier {
     let edge: HorizontalEdge
     @Environment(AppModel.self) private var model
-    @State private var width: CGFloat = 260
-    @State private var dragStart: CGFloat?
 
     func body(content: Content) -> some View {
-        HStack(spacing: 0) {
-            if edge == .leading, model.showsOutlinePanel {
-                panel
-                divider
+        if edge == .trailing {
+            content.inspector(isPresented: Binding(
+                get: { model.showsOutlinePanel },
+                // Only a change the reader made, such as dragging it closed, updates the preference.
+                set: { shown in if shown != model.showsOutlinePanel { model.setOutlineShown(shown) } }
+            )) {
+                OutlinePanel()
+                    .inspectorColumnWidth(min: OutlineLayout.minWidth, ideal: OutlineLayout.idealWidth, max: OutlineLayout.maxWidth)
             }
-            content
-            if edge == .trailing, model.showsOutlinePanel {
-                divider
-                panel
+        } else {
+            HStack(spacing: 0) {
+                if model.showsOutlinePanel {
+                    LeadingOutlinePanel()
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                }
+                content
             }
         }
     }
+}
 
-    private var panel: some View {
-        OutlinePanel()
-            .frame(width: width)
-            .transition(.move(edge: edge == .leading ? .leading : .trailing).combined(with: .opacity))
+/// The outline on the leading side, with a divider that resizes it and remembers its width.
+private struct LeadingOutlinePanel: View {
+    @AppStorage("outlinePanelWidth") private var storedWidth = Double(OutlineLayout.idealWidth)
+    @State private var dragStart: CGFloat?
+
+    var body: some View {
+        let width = OutlineLayout.clampedWidth(storedWidth)
+        HStack(spacing: 0) {
+            OutlinePanel()
+                .frame(width: width)
+            divider(width: width)
+        }
     }
 
-    /// A divider that resizes the panel when dragged.
-    private var divider: some View {
+    private func divider(width: CGFloat) -> some View {
         Divider()
             .ignoresSafeArea()
             .overlay {
@@ -226,11 +264,20 @@ private struct OutlinePlacement: ViewModifier {
                             .onChanged { value in
                                 let start = dragStart ?? width
                                 dragStart = start
-                                let delta = value.translation.width * (edge == .leading ? 1 : -1)
-                                width = min(max(start + delta, 190), 440)
+                                storedWidth = Double(OutlineLayout.clampedWidth(start + value.translation.width))
                             }
                             .onEnded { _ in dragStart = nil }
                     )
+                    .accessibilityElement()
+                    .accessibilityLabel("Outline Width")
+                    .accessibilityValue("\(Int(width)) points")
+                    .accessibilityAdjustableAction { direction in
+                        switch direction {
+                        case .increment: storedWidth = Double(OutlineLayout.clampedWidth(width + OutlineLayout.widthStep))
+                        case .decrement: storedWidth = Double(OutlineLayout.clampedWidth(width - OutlineLayout.widthStep))
+                        @unknown default: break
+                        }
+                    }
             }
     }
 }
@@ -246,9 +293,10 @@ struct OutlineToolbarButton: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        let shown = model.showsOutlinePanel
         Button { model.toggleOutline() } label: {
-            Label(model.isOutlineVisible ? "Hide Outline" : "Show Outline", systemImage: "list.bullet.indent")
+            Label(shown ? "Hide Outline" : "Show Outline", systemImage: "list.bullet.indent")
         }
-        .help("Show or hide the outline and links \(model.shortcut(for: .toggleOutline).map { "(\($0.display))" } ?? "")")
+        .help(model.helpText(shown ? "Hide the outline and links" : "Show the outline and links", .toggleOutline))
     }
 }

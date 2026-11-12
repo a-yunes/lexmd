@@ -69,14 +69,32 @@ final class AppModel {
     var currentFile: URL?
     private(set) var wordCount = 0
     var saveError: String?
-    private(set) var viewMode: ViewMode = .read
+    private(set) var viewMode: ViewMode = .read {
+        didSet { updateOutlineFit() }
+    }
     private(set) var fontScale: Double = 1
     private(set) var recentFolders: [String] = []
-    var columnVisibility: NavigationSplitViewVisibility = .all
-    var isInspectorPresented = true
-    var sidebarPosition: SidebarPosition = .left {
-        didSet { defaults.set(sidebarPosition.rawValue, forKey: Keys.sidebarPosition) }
+    var columnVisibility: NavigationSplitViewVisibility = .all {
+        didSet { updateOutlineFit() }
     }
+    var isInspectorPresented = true {
+        didSet { updateOutlineFit() }
+    }
+    var sidebarPosition: SidebarPosition = .left {
+        didSet {
+            defaults.set(sidebarPosition.rawValue, forKey: Keys.sidebarPosition)
+            updateOutlineFit()
+        }
+    }
+    /// The window's width, reported by the window. With the sidebar and the view mode, it
+    /// decides whether the outline fits beside the document.
+    @ObservationIgnored var windowWidth: CGFloat = .infinity {
+        didSet { updateOutlineFit() }
+    }
+    /// False while the window is too narrow for the outline beside the document.
+    var outlineFitsWindow = true
+    /// Set when the reader shows the outline in a window too narrow for it.
+    var showsOutlineWhileNarrow = false
     var appearanceMode: AppearanceMode = .system {
         didSet {
             defaults.set(appearanceMode.rawValue, forKey: Keys.appearance)
