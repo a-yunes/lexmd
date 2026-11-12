@@ -119,6 +119,7 @@ struct LexMDCommands: Commands {
             SettingsTabButton("Keyboard Shortcuts", tab: .shortcuts, model: model)
             Divider()
             Button("Welcome to LexMD") { model.showOnboarding() }
+            Button("Open Demo Project") { model.openDemoProject() }
             Divider()
             Button("LexMD Website") { NSWorkspace.shared.open(AppModel.websiteURL) }
             Button("Report an Issue…") { NSWorkspace.shared.open(AppModel.newIssueURL) }

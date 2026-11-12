@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// First-run setup, shown as a sheet on the main window. Every step is optional.
+/// First-run setup, shown as a sheet on the main window. The tour step opens the demo project
+/// behind the sheet; the other choices are optional.
 struct OnboardingView: View {
     @Environment(AppModel.self) private var model
     @State private var step = Step.welcome
@@ -10,7 +11,7 @@ struct OnboardingView: View {
     @State private var defaultError: String?
 
     enum Step: Int, CaseIterable {
-        case welcome, folder, finish
+        case welcome, tour, folder, finish
     }
 
     @Environment(\.sheetHeightLimit) private var heightLimit
@@ -30,7 +31,10 @@ struct OnboardingView: View {
                 if step != .welcome {
                     Button("Back") { withMotion(.snappy) { step = Step(rawValue: step.rawValue - 1) ?? .welcome } }
                 } else {
-                    Button("Skip") { model.completeOnboarding() }
+                    Button("Skip") {
+                        if model.rootURL == nil { model.openDemoProject() }
+                        model.completeOnboarding()
+                    }
                         .keyboardShortcut(.cancelAction)
                 }
                 Spacer()
@@ -48,6 +52,10 @@ struct OnboardingView: View {
         }
         .padding(40)
         .frame(width: 540, height: min(600, heightLimit))
+        .onChange(of: step) { _, step in
+            // The tour shows LexMD working on a real project, so the demo opens behind the sheet.
+            if step == .tour, !DemoProject.isDemo(model.rootURL) { model.openDemoProject() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             isDefaultApp = MarkdownDefaultApp.isLexMD
         }
@@ -88,6 +96,7 @@ struct OnboardingView: View {
     private var title: String {
         switch step {
         case .welcome: "Every doc, at a glance."
+        case .tour: "Take the tour."
         case .folder: "Open a project."
         case .finish: "Make it yours."
         }
@@ -96,6 +105,7 @@ struct OnboardingView: View {
     private var subtitle: String {
         switch step {
         case .welcome: "Welcome to LexMD. See all of a project’s Markdown documents in one place, then read and update them."
+        case .tour: "LexMD opened a demo project behind this window. It shows what the preview can do, and it is yours to edit."
         case .folder: "Pick a project folder. LexMD shows only its Markdown documents."
         case .finish: "A few choices to start with. Change any of them later in Settings."
         }
@@ -112,24 +122,34 @@ struct OnboardingView: View {
             }
             .font(.callout)
 
+        case .tour:
+            VStack(alignment: .leading, spacing: 16) {
+                Label("Diagrams, math, callouts, tables, and code.", systemImage: "chart.bar.doc.horizontal")
+                Label("An outline with backlinks and broken-link checks.", systemImage: "list.bullet.indent")
+                Label("Wiki links and images from the project.", systemImage: "link")
+                Label("Bring it back any time from Help > Open Demo Project.", systemImage: "questionmark.circle")
+            }
+            .font(.callout)
+
         case .folder:
+            let ownProject = DemoProject.isDemo(model.rootURL) ? nil : model.rootURL
             VStack(spacing: 14) {
                 HStack(spacing: 12) {
-                    Image(systemName: model.rootURL == nil ? "folder.badge.questionmark" : "folder.fill")
+                    Image(systemName: ownProject == nil ? "folder.badge.questionmark" : "folder.fill")
                         .font(.system(size: 26))
-                        .foregroundStyle(model.rootURL == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.tint))
+                        .foregroundStyle(ownProject == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.tint))
                         .frame(width: 34)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(model.rootURL?.lastPathComponent ?? "No project yet")
+                        Text(ownProject?.lastPathComponent ?? "No project yet")
                             .font(.headline)
-                        Text(model.rootURL.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? model.shortcut(for: .open).map { "Pick one now, or later with \($0.display)." } ?? "Pick one now, or later from the File menu.")
+                        Text(ownProject.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? model.shortcut(for: .open).map { "Pick one now, or later with \($0.display). Until then, the demo stays open." } ?? "Pick one now, or later from the File menu. Until then, the demo stays open.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                            .lineLimit(ownProject == nil ? 2 : 1)
                             .truncationMode(.middle)
                     }
                     Spacer(minLength: 8)
-                    Button(model.rootURL == nil ? "Choose Project…" : "Change…") { chooseFolder() }
+                    Button(ownProject == nil ? "Choose Project…" : "Change…") { chooseFolder() }
                 }
                 .padding(16)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))

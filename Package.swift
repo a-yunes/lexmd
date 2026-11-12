@@ -33,7 +33,7 @@ let package = Package(
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Sources/LexMD",
-            resources: [.copy("../../Resources/Vendor"), .copy("../../Resources/Help")],
+            resources: [.copy("../../Resources/Vendor"), .copy("../../Resources/Help"), .copy("../../Resources/Demo")],
             swiftSettings: appSwiftSettings,
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),

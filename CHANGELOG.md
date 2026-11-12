@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A demo project with diagrams, math, callouts, links and images opens during setup. Help > Open
+  Demo Project brings it back, restoring any demo files that were deleted.
 - Mermaid diagrams render with Pele and math renders with KaTeX (`$inline$`, `$$display$$`,
   `math` blocks), both following light and dark. Footnotes get links and back-links, and simple
   front matter shows as a properties table.
