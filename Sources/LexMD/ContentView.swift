@@ -15,6 +15,7 @@ extension EnvironmentValues {
 
 struct ContentView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var sheetHeightLimit: CGFloat = .infinity
 
     var body: some View {
@@ -47,7 +48,7 @@ struct ContentView: View {
             if model.isQuickSearchVisible {
                 QuickSearchOverlay()
                     .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .top)),
+                        insertion: .motion(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)), reduced: reduceMotion),
                         removal: .opacity
                     ))
             }
@@ -376,11 +377,11 @@ struct FileRow: View {
         if let children = node.children {
             let expanded = row.isExpanded
             Button {
-                withAnimation(.snappy(duration: 0.22)) { model.setExpanded(node, !expanded) }
+                withMotion(.snappy(duration: 0.22)) { model.setExpanded(node, !expanded) }
             } label: {
                 HStack(spacing: 3) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.caption2.weight(.bold))
                         .foregroundStyle(.tertiary)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                         .frame(width: 12)
@@ -458,7 +459,7 @@ struct ExpandAllButton: View {
     var body: some View {
         let expanded = model.allFoldersExpanded
         Button {
-            withAnimation(.snappy(duration: 0.25)) { model.setAllFoldersExpanded(!expanded) }
+            withMotion(.snappy(duration: 0.25)) { model.setAllFoldersExpanded(!expanded) }
         } label: {
             Label(expanded ? "Collapse All Folders" : "Expand All Folders",
                   systemImage: expanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
@@ -487,6 +488,7 @@ struct RowMenu: View {
 
 struct DetailView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         documentArea
@@ -496,7 +498,7 @@ struct DetailView: View {
                         .padding(.top, 12)
                         .padding(.trailing, 18)
                         .transition(.asymmetric(
-                            insertion: .opacity.combined(with: .offset(y: -8)),
+                            insertion: .motion(.opacity.combined(with: .offset(y: -8)), reduced: reduceMotion),
                             removal: .opacity
                         ))
                 }

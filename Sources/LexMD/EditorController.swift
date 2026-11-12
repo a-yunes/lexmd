@@ -121,6 +121,8 @@ final class EditorController: NSObject, NSTextViewDelegate {
         textView.typingAttributes = MarkdownHighlighter.baseAttributes(size: fontSize)
         textView.delegate = self
         textView.editor = self
+        textView.setAccessibilityLabel("Editor")
+        textView.setAccessibilityIdentifier("editor")
 
         scrollView.documentView = textView
         scrollView.contentView.postsBoundsChangedNotifications = true
@@ -199,7 +201,12 @@ final class EditorController: NSObject, NSTextViewDelegate {
         guard !ranges.isEmpty else { return }
         for (index, range) in ranges.enumerated() {
             let color = index == current ? Self.currentMatchColor : Self.matchColor
-            addHighlight(color, range)
+            addHighlight(.backgroundColor, color, range)
+        }
+        // With Differentiate Without Color, the current match is also underlined.
+        if let current, ranges.indices.contains(current),
+           NSWorkspace.shared.accessibilityDisplayShouldDifferentiateWithoutColor {
+            addHighlight(.underlineStyle, NSUnderlineStyle.thick.rawValue, ranges[current])
         }
         hasFindHighlights = true
     }
@@ -209,20 +216,22 @@ final class EditorController: NSObject, NSTextViewDelegate {
         hasFindHighlights = false
         if let layoutManager = textView.textLayoutManager, let content = layoutManager.textContentManager {
             layoutManager.removeRenderingAttribute(.backgroundColor, for: content.documentRange)
+            layoutManager.removeRenderingAttribute(.underlineStyle, for: content.documentRange)
         } else if let layoutManager = textView.layoutManager {
             let full = NSRange(location: 0, length: (textView.string as NSString).length)
             layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: full)
+            layoutManager.removeTemporaryAttribute(.underlineStyle, forCharacterRange: full)
         }
     }
 
-    private func addHighlight(_ color: NSColor, _ range: NSRange) {
+    private func addHighlight(_ key: NSAttributedString.Key, _ value: Any, _ range: NSRange) {
         if let layoutManager = textView.textLayoutManager, let content = layoutManager.textContentManager {
             guard let start = content.location(content.documentRange.location, offsetBy: range.location),
                   let end = content.location(start, offsetBy: range.length),
                   let textRange = NSTextRange(location: start, end: end) else { return }
-            layoutManager.addRenderingAttribute(.backgroundColor, value: color, for: textRange)
+            layoutManager.addRenderingAttribute(key, value: value, for: textRange)
         } else {
-            textView.layoutManager?.addTemporaryAttribute(.backgroundColor, value: color, forCharacterRange: range)
+            textView.layoutManager?.addTemporaryAttribute(key, value: value, forCharacterRange: range)
         }
     }
 

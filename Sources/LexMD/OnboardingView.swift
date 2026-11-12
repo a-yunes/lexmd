@@ -28,7 +28,7 @@ struct OnboardingView: View {
 
             HStack {
                 if step != .welcome {
-                    Button("Back") { withAnimation(.snappy) { step = Step(rawValue: step.rawValue - 1) ?? .welcome } }
+                    Button("Back") { withMotion(.snappy) { step = Step(rawValue: step.rawValue - 1) ?? .welcome } }
                 } else {
                     Button("Skip") { model.completeOnboarding() }
                         .keyboardShortcut(.cancelAction)
@@ -36,7 +36,7 @@ struct OnboardingView: View {
                 Spacer()
                 Button(step == .finish ? "Start Reading" : "Continue") {
                     if let next = Step(rawValue: step.rawValue + 1) {
-                        withAnimation(.snappy) { step = next }
+                        withMotion(.snappy) { step = next }
                     } else {
                         model.completeOnboarding()
                     }

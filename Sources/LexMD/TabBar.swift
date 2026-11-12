@@ -32,6 +32,8 @@ struct DocumentTabBar: View {
             }
             .frame(height: 30)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { barWidth = $0 }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Tabs")
         }
     }
 }
@@ -112,7 +114,7 @@ private struct TabStrip: View {
                 }
                 .onChange(of: list.activeID) { _, id in
                     guard let id else { return }
-                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id) }
+                    withMotion(.easeOut(duration: 0.2)) { proxy.scrollTo(id) }
                 }
             }
         }
@@ -145,8 +147,9 @@ private struct TabItem: View {
             .foregroundStyle(.secondary)
             .opacity(isHovering || unsaved ? 1 : 0)
             .help(unsaved ? "Unsaved changes. \(close)" : close)
+            .accessibilityLabel("Close Tab")
             Text(title)
-                .font(.system(size: 12, weight: isActive ? .semibold : .regular))
+                .font(.callout.weight(isActive ? .semibold : .regular))
                 .italic(missing)
                 .strikethrough(missing)
                 .foregroundStyle(isActive ? .primary : .secondary)
@@ -237,7 +240,7 @@ private struct TabDropDelegate: DropDelegate {
     func dropEntered(info: DropInfo) {
         guard validateDrop(info: info), let dragging = model.tabStore.draggingID, dragging != target,
               let index = model.tabStore.list.index(of: target) else { return }
-        withAnimation(.snappy(duration: 0.2)) { model.moveTab(dragging, to: index) }
+        withMotion(.snappy(duration: 0.2)) { model.moveTab(dragging, to: index) }
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {

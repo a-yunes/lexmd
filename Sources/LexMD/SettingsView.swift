@@ -342,7 +342,7 @@ private struct ShortcutRecorder: View {
                 model.resetShortcut(action)
             } label: {
                 Image(systemName: "arrow.uturn.backward.circle.fill")
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .help("Restore Default (\(action.defaultShortcut?.display ?? "None"))")

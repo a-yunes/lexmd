@@ -237,7 +237,7 @@ extension AppModel {
 
     func toggleOutline() {
         guard canShowOutline else { NSSound.beep(); return }
-        withAnimation(.snappy(duration: 0.25)) { setOutlineShown(!showsOutlinePanel) }
+        withMotion(.snappy(duration: 0.25)) { setOutlineShown(!showsOutlinePanel) }
     }
 
     /// Shows or hides the panel as the reader sees it, including in a narrow window.

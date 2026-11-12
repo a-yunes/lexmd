@@ -9,6 +9,11 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     var onHighlightCount: ((Int) -> Void)?
     /// The id of the heading in view as the preview scrolls (empty above the first heading).
     var onHeadingChange: ((String) -> Void)?
+    /// Pinch gestures, in text size steps (positive is bigger).
+    var onPinch: ((Int) -> Void)? {
+        get { (webView as? PreviewWebView)?.onPinch }
+        set { (webView as? PreviewWebView)?.onPinch = newValue }
+    }
 
     struct Highlight: Equatable {
         var query: String
@@ -47,6 +52,10 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     private let userContent: WKUserContentController
     private var injectedLibraries: Set<Int> = []
     private var pageLibraries: Set<Int> = []
+    /// The document's name, announced by VoiceOver as the page title.
+    private var documentTitle = ""
+    /// Underlines links and marks the current find match with more than color.
+    private(set) var differentiatesWithoutColor = NSWorkspace.shared.accessibilityDisplayShouldDifferentiateWithoutColor
 
     init(allowsRemoteContent: Bool) {
         self.allowsRemoteContent = allowsRemoteContent
@@ -64,8 +73,12 @@ final class PreviewController: NSObject, WKNavigationDelegate {
             source: PreviewTemplate.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Self.world
         ))
         configuration.userContentController = content
+        // Tab moves through links and buttons, such as a code block's Copy button.
+        configuration.preferences.tabFocusesLinks = true
         userContent = content
-        webView = WKWebView(frame: .zero, configuration: configuration)
+        webView = PreviewWebView(frame: .zero, configuration: configuration)
+        webView.setAccessibilityLabel("Preview")
+        webView.setAccessibilityIdentifier("preview")
 
         super.init()
         // The content controller keeps its handlers alive, so it gets a proxy that holds this controller weakly.
@@ -74,7 +87,37 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         webView.setValue(false, forKey: "drawsBackground")
         webView.allowsMagnification = false
         webView.allowsBackForwardNavigationGestures = false
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(displayOptionsDidChange(_:)),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil
+        )
         loadTemplate()
+    }
+
+    @objc private func displayOptionsDidChange(_ notification: Notification) {
+        setDifferentiatesWithoutColor(NSWorkspace.shared.accessibilityDisplayShouldDifferentiateWithoutColor)
+    }
+
+    /// Follows the system's Differentiate Without Color setting.
+    func setDifferentiatesWithoutColor(_ value: Bool) {
+        guard value != differentiatesWithoutColor else { return }
+        differentiatesWithoutColor = value
+        applyPageOptions()
+    }
+
+    /// Names the page after the document, so VoiceOver announces which document it shows.
+    func setDocumentTitle(_ title: String) {
+        guard title != documentTitle else { return }
+        documentTitle = title
+        applyPageOptions()
+    }
+
+    private func applyPageOptions() {
+        guard isLoaded else { return }
+        call(
+            "document.documentElement.classList.toggle('lexmd-differentiate', differentiate); document.title = title",
+            ["differentiate": differentiatesWithoutColor, "title": documentTitle]
+        )
     }
 
     private func loadTemplate() {
@@ -185,7 +228,7 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     /// Scrolls a heading to the top, now or (`afterRender`) once the next document has rendered.
     func revealHeading(_ id: String, smooth: Bool, afterRender: Bool = false) {
         guard !afterRender, isLoaded else { pendingHeading = (id, afterRender); return }
-        call("lexmdReveal(id, smooth)", ["id": id, "smooth": smooth])
+        call("lexmdReveal(id, smooth)", ["id": id, "smooth": smooth && !Motion.isReduced])
     }
 
     func setScale(_ value: Double) {
@@ -232,6 +275,7 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         templateRetries = 0
         isLoaded = true
         call("lexmdZoom(s)", ["s": scale])
+        applyPageOptions()
         pendingReset = true
         flush()
     }
@@ -283,6 +327,36 @@ final class PreviewController: NSObject, WKNavigationDelegate {
             onOpenURL?(url)
         }
         return .cancel
+    }
+}
+
+/// The preview's web view. Pinching changes LexMD's text size, the same setting as Make Text
+/// Bigger and Make Text Smaller, instead of magnifying the page: a second, separate zoom would
+/// leave Actual Size unable to reset it and the scroll indicator and scroll sync out of step.
+final class PreviewWebView: WKWebView {
+    var onPinch: ((Int) -> Void)?
+    private var pinch = PinchSteps()
+
+    override func magnify(with event: NSEvent) {
+        guard let onPinch else { return super.magnify(with: event) }
+        let steps = pinch.steps(adding: event.magnification, phase: event.phase)
+        if steps != 0 { onPinch(steps) }
+    }
+}
+
+/// Turns a pinch gesture's running magnification into whole text size steps.
+struct PinchSteps {
+    /// How far fingers spread or close for one step.
+    static let threshold: CGFloat = 0.12
+    private var pending: CGFloat = 0
+
+    mutating func steps(adding magnification: CGFloat, phase: NSEvent.Phase) -> Int {
+        if phase.contains(.began) { pending = 0 }
+        pending += magnification
+        let steps = Int((pending / Self.threshold).rounded(.towardZero))
+        pending -= CGFloat(steps) * Self.threshold
+        if phase.contains(.ended) || phase.contains(.cancelled) { pending = 0 }
+        return steps
     }
 }
 

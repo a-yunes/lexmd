@@ -242,7 +242,7 @@ struct GitKindLabel: View {
 
     var body: some View {
         Text(kind.letter)
-            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .font(.system(.caption, design: .monospaced, weight: .semibold))
             .foregroundStyle(kind.color)
             .frame(minWidth: 12)
             .help(kind.help)
@@ -303,7 +303,7 @@ struct CommitSheet: View {
                         .foregroundStyle(.secondary)
                         .help(session.snapshot?.branch == nil ? "HEAD is not on a branch" : "Current branch")
                     if session.snapshot?.head == nil {
-                        Text("No commits yet").foregroundStyle(.tertiary)
+                        Text("No commits yet").foregroundStyle(.secondary)
                     }
                 }
                 Spacer()
@@ -444,10 +444,16 @@ struct CommitSheet: View {
                     .focused($summaryFocused)
                 let count = session.summary.count
                 if count > 50 {
-                    Text("\(count)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(count > 72 ? .orange : .secondary)
-                        .help("Short summaries of 50 characters or fewer read best in Git history.")
+                    // Past 72 characters a symbol joins the color, so the warning never relies on hue alone.
+                    HStack(spacing: 3) {
+                        if count > 72 { Image(systemName: "exclamationmark.triangle.fill") }
+                        Text("\(count)")
+                    }
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(count > 72 ? .orange : .secondary)
+                    .help("Short summaries of 50 characters or fewer read best in Git history.")
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(count > 72 ? "\(count) characters, longer than 72" : "\(count) characters")
                 }
             }
             ZStack(alignment: .topLeading) {
@@ -457,7 +463,7 @@ struct CommitSheet: View {
                     .padding(4)
                 if session.details.isEmpty {
                     Text("Description (optional)")
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Color(nsColor: .placeholderTextColor))
                         .padding(.horizontal, 9)
                         .padding(.vertical, 4)
                         .allowsHitTesting(false)
