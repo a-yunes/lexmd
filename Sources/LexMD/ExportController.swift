@@ -9,6 +9,8 @@ struct ExportDocument {
     var baseURL: URL?
     var title: String
     var allowsRemoteContent = false
+    /// Resolves wiki links to the documents they name; without it they stay text.
+    var links: LinkContext?
 }
 
 enum ExportError: LocalizedError {
@@ -49,7 +51,8 @@ final class OffscreenRenderer {
     /// Renders Markdown and waits until LexMD's script, images (for print), and fonts have settled.
     func load(_ document: ExportDocument, forPrint: Bool, timeout: Double = 20) async throws {
         let markdown = document.markdown
-        let html = await runDetached { MarkdownHTML.render(markdown) }
+        let links = document.links
+        let html = await runDetached { MarkdownHTML.render(markdown, links: links) }
         preview.render(html: html, baseURL: document.baseURL, resetScroll: true)
         let deadline = Date().addingTimeInterval(timeout)
         while !preview.isPageLoaded {

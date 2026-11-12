@@ -194,6 +194,32 @@ struct OutlineLinkTests {
         #expect(snapshot.incoming[root + "/Doc.md"]?.count == 4)
     }
 
+    @Test func exportsResolveWikiLinks() async throws {
+        let folder = try TestFolder()
+        let root = FileScanner.canonicalPath(folder.url.path)
+        try FileManager.default.createDirectory(atPath: root + "/notes", withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: root + "/out", withIntermediateDirectories: true)
+        try "# Target\n\n## Part One\n".write(toFile: root + "/notes/My Target.md", atomically: true, encoding: .utf8)
+        let source = "See [[my target]], [[My Target#Part One|part]], [[Nope]], [gone](gone.md), and [[My Target#Missing]].\n"
+        try folder.write("Doc.md", source)
+        let snapshot = LinkIndexBuilder.build(root: root, previous: LinkIndexSnapshot(), changed: nil)
+        var links = LinkContext(documentPath: root + "/Doc.md", source: source, snapshot: snapshot)
+        links.marksBrokenLinks = false
+        let document = ExportDocument(markdown: source, baseURL: URL(fileURLWithPath: root), title: "Doc", links: links)
+
+        // Links point at the documents from wherever the export is saved, with heading fragments.
+        let html = try await Exporter.exportHTML(document, to: URL(fileURLWithPath: root + "/out/Doc.html")).html
+        let body = try #require(html.components(separatedBy: "<article id=\"content\">").last)
+        #expect(body.contains(#"<a class="lexmd-wiki" href="../notes/My%20Target.md">my target</a>"#))
+        #expect(body.contains(#"<a class="lexmd-wiki" href="../notes/My%20Target.md#part-one">part</a>"#))
+        #expect(body.contains(#"<a class="lexmd-wiki" href="../notes/My%20Target.md#missing">My Target › Missing</a>"#))
+        // Unresolved wiki links stay styled text; broken links are not marked in exports.
+        #expect(body.contains(#"<span class="lexmd-wiki lexmd-missing" title="No document named “Nope”">Nope</span>"#))
+        #expect(body.contains(#"gone.md">gone</a>"#))
+        #expect(!body.contains("lexmd-broken"))
+        #expect(html.contains(".lexmd-missing"), "the missing style travels with the page")
+    }
+
     // MARK: Index and backlinks
 
     @Test func backlinksAcrossFiles() async throws {

@@ -231,6 +231,14 @@ extension AppModel {
         LinkContext(documentPath: currentFile?.path, source: source, snapshot: outline.index.snapshot, marksBrokenLinks: marksBrokenLinks)
     }
 
+    /// The link context for exports: wiki links resolve as in the preview, but broken links are
+    /// not marked, since that is an editing aid rather than part of the document.
+    func exportLinkContext(for source: String) -> LinkContext {
+        var context = linkContext(for: source)
+        context.marksBrokenLinks = false
+        return context
+    }
+
     // MARK: Analysis
 
     func scheduleOutlineUpdate(debounce: Bool) {

@@ -10,7 +10,7 @@ extension AppModel {
         guard let currentFile else { return nil }
         return ExportDocument(
             markdown: text, baseURL: currentFile.deletingLastPathComponent(), title: title,
-            allowsRemoteContent: loadsRemoteContent
+            allowsRemoteContent: loadsRemoteContent, links: exportLinkContext(for: text)
         )
     }
 
