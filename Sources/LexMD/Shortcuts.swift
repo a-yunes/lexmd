@@ -109,6 +109,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case commit
     case exportPDF, exportHTML, printDocument, copyRichText
     case toggleOutline
+    case installCommandLineTool
 
     var id: String { rawValue }
 
@@ -131,6 +132,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .focusMode, .typewriterScrolling: .view
         case .commit: .sourceControl
         case .exportPDF, .exportHTML, .printDocument, .copyRichText: .file
+        case .installCommandLineTool: .file
         }
     }
 
@@ -178,6 +180,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .printDocument: "Print…"
         case .copyRichText: "Copy as Rich Text"
         case .toggleOutline: "Show/Hide Outline"
+        case .installCommandLineTool: "Install Command Line Tool…"
         }
     }
 
@@ -225,6 +228,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .printDocument: "option+cmd+p"
         case .copyRichText: "option+cmd+c"
         case .toggleOutline: "option+cmd+o"
+        case .installCommandLineTool: ""
         }
         return Shortcut(string: value)
     }

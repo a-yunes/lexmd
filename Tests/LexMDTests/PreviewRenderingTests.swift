@@ -3,6 +3,7 @@ import Foundation
 import Testing
 import WebKit
 @testable import LexMD
+@testable import LexMDRendering
 
 /// Math, footnotes, and front matter in the Markdown renderer.
 struct MarkdownRenderingTests {

@@ -8,36 +8,36 @@ import Markdown
 /// Math follows pandoc: an opening `$` is not followed by whitespace, a closing `$` is not
 /// preceded by whitespace or followed by a digit, `\$` is a literal dollar, and math never spans
 /// a blank line. Code spans and blocks take precedence over math.
-struct MarkdownExtensions {
-    enum Item: Equatable {
+package struct MarkdownExtensions {
+    package enum Item: Equatable {
         case math(tex: String, display: Bool, source: String)
         case footnoteRef(number: Int, occurrence: Int, source: String)
 
-        var source: String {
+        package var source: String {
             switch self {
             case .math(_, _, let source), .footnoteRef(_, _, let source): return source
             }
         }
     }
 
-    struct Footnote: Equatable {
+    package struct Footnote: Equatable {
         var label: String
         var body: String
         var references = 0
     }
 
     /// The source with tokens in place of extension syntax.
-    private(set) var source: String
-    private(set) var items: [Item] = []
+    package private(set) var source: String
+    package private(set) var items: [Item] = []
     /// The UTF-8 byte range in the original source that each item replaced.
-    private(set) var itemRanges: [Range<Int>] = []
+    package private(set) var itemRanges: [Range<Int>] = []
     /// Referenced footnotes in numbering order.
-    private(set) var footnotes: [Footnote] = []
+    package private(set) var footnotes: [Footnote] = []
 
-    static let tokenStart: Unicode.Scalar = "\u{E000}"
-    static let tokenEnd: Unicode.Scalar = "\u{E001}"
+    package static let tokenStart: Unicode.Scalar = "\u{E000}"
+    package static let tokenEnd: Unicode.Scalar = "\u{E001}"
 
-    init(_ source: String, footnotes allowFootnotes: Bool = true) {
+    package init(_ source: String, footnotes allowFootnotes: Bool = true) {
         self.source = source
         let mayHaveMath = source.contains("$")
         let mayHaveFootnotes = allowFootnotes && source.contains("[^")
@@ -117,7 +117,7 @@ struct MarkdownExtensions {
     // MARK: Tokens
 
     /// Calls `body` for each token in `text`, with the token's range and item.
-    func forEachToken(in text: String, _ body: (Range<String.Index>, Item) -> Void) {
+    package func forEachToken(in text: String, _ body: (Range<String.Index>, Item) -> Void) {
         guard !items.isEmpty else { return }
         var index = text.startIndex
         while let start = text[index...].firstIndex(where: { $0.unicodeScalars.first == Self.tokenStart }) {
@@ -131,12 +131,12 @@ struct MarkdownExtensions {
     }
 
     /// Whether text holds a placeholder.
-    static func containsToken(_ text: String) -> Bool {
+    package static func containsToken(_ text: String) -> Bool {
         text.unicodeScalars.contains(tokenStart)
     }
 
     /// Puts the original syntax back, for attributes, slugs, and other plain-text contexts.
-    func restore(_ text: String) -> String {
+    package func restore(_ text: String) -> String {
         guard !items.isEmpty, text.unicodeScalars.contains(Self.tokenStart) else { return text }
         var out = ""
         var last = text.startIndex
@@ -149,7 +149,7 @@ struct MarkdownExtensions {
     }
 
     /// Replaces tokens in rendered HTML. A paragraph holding only display math becomes a block.
-    func finish(_ html: String) -> String {
+    package func finish(_ html: String) -> String {
         guard !items.isEmpty, html.unicodeScalars.contains(Self.tokenStart) else { return html }
         var out = ""
         out.reserveCapacity(html.utf8.count)
@@ -171,7 +171,7 @@ struct MarkdownExtensions {
         return out + html[last...]
     }
 
-    static func html(for item: Item, block: Bool = false) -> String {
+    package static func html(for item: Item, block: Bool = false) -> String {
         let esc = MarkdownHTML.escape
         switch item {
         case let .math(tex, display, source):
@@ -187,7 +187,7 @@ struct MarkdownExtensions {
     }
 
     /// The footnotes section, given each footnote's rendered body.
-    func footnotesHTML(_ renderBody: (String) -> String) -> String {
+    package func footnotesHTML(_ renderBody: (String) -> String) -> String {
         guard !footnotes.isEmpty else { return "" }
         var html = "<section class=\"footnotes\">\n<ol>\n"
         for (index, note) in footnotes.enumerated() {
@@ -222,7 +222,7 @@ struct MarkdownExtensions {
     }
 
     /// Math starting at the `$` at `start`, ending before `limit`.
-    static func math(_ bytes: [UInt8], at start: Int, limit: Int) -> (Int, Item)? {
+    package static func math(_ bytes: [UInt8], at start: Int, limit: Int) -> (Int, Item)? {
         let display = start + 1 < limit && bytes[start + 1] == 0x24
         var j = start + (display ? 2 : 1)
         let contentStart = j
@@ -440,14 +440,14 @@ private struct ProtectedRangeCollector: MarkupWalker {
 }
 
 /// Simple YAML front matter (scalar values and flat lists) shown as a properties table.
-enum FrontMatter {
-    enum Value: Equatable {
+package enum FrontMatter {
+    package enum Value: Equatable {
         case scalar(String)
         case list([String])
     }
 
     /// The key-value pairs, or nil when the YAML uses anything beyond scalars and flat lists.
-    static func properties(_ yaml: String) -> [(key: String, value: Value)]? {
+    package static func properties(_ yaml: String) -> [(key: String, value: Value)]? {
         var result: [(key: String, value: Value)] = []
         var listKey: String?
         var listItems: [String] = []
@@ -484,7 +484,7 @@ enum FrontMatter {
         return result.isEmpty ? nil : result
     }
 
-    static func html(_ yaml: String) -> String? {
+    package static func html(_ yaml: String) -> String? {
         guard let properties = properties(yaml) else { return nil }
         let esc = MarkdownHTML.escape
         var rows = ""

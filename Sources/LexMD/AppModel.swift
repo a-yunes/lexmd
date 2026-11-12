@@ -1,5 +1,6 @@
 import AppKit
 import CoreServices
+import LexMDRendering
 import Observation
 import SwiftUI
 import UniformTypeIdentifiers

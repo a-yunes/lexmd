@@ -1,3 +1,5 @@
+import LexMDRendering
+
 /// Diagrams (Pele), math (KaTeX), footnotes, and front matter properties in the preview.
 /// The script runs in LexMD's content world next to `PreviewTemplate.script`, with Pele and
 /// KaTeX injected into the same world. Rendered output is real DOM and SVG in the document.
@@ -7,89 +9,7 @@ extension PreviewTemplate {
         "<style>\n\(renderingStyle)</style>\n" + (VendorAssets.katexStyle.map { "<style id=\"lexmd-katex\">\n\($0)\n</style>\n" } ?? "")
     }
 
-    static let renderingStyle = #"""
-:root {
-  --diagram-bg: #ffffff;
-  --diagram-surface: #f5f5f7;
-  --diagram-surface-alt: #e8e8ed;
-  --diagram-border: #b8b8bf;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --diagram-bg: #1c1c1e;
-    --diagram-surface: #2c2c2e;
-    --diagram-surface-alt: #3a3a3c;
-    --diagram-border: #636366;
-  }
-}
-.lexmd-diagram { margin: 0 0 1.15em; }
-.lexmd-diagram > .codeblock { margin: 0; }
-.lexmd-diagram-view {
-  --pele-bg: var(--diagram-bg);
-  --pele-fg: var(--text);
-  --pele-muted: var(--secondary);
-  --pele-line: var(--secondary);
-  --pele-surface: var(--diagram-surface);
-  --pele-surface-alt: var(--diagram-surface-alt);
-  --pele-border: var(--diagram-border);
-  --pele-accent: var(--accent);
-  --pele-error: var(--caution);
-  --pele-critical: var(--caution);
-  --pele-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
-  --pele-font-mono: "SF Mono", ui-monospace, Menlo, monospace;
-  --pele-radius: 6px;
-  padding: 1.1rem;
-  border-radius: 12px;
-  background: var(--diagram-bg);
-  border: 1px solid var(--hair);
-  overflow-x: auto;
-  text-align: center;
-  line-height: normal;
-}
-.lexmd-diagram-view > svg { display: inline-block; max-width: 100%; height: auto; vertical-align: top; }
-.lexmd-render-error {
-  margin: 0.45em 0 0;
-  white-space: pre-wrap;
-  font-family: "SF Mono", ui-monospace, Menlo, monospace;
-  font-size: 0.72rem;
-  line-height: 1.45;
-  color: var(--caution);
-}
-.lexmd-math { color: var(--secondary); font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 0.85em; }
-.lexmd-math.rendered { color: inherit; font-family: inherit; font-size: inherit; }
-div.lexmd-math, span.lexmd-display:not(.rendered) { display: block; margin: 0 0 1.15em; white-space: pre-wrap; text-align: center; }
-div.lexmd-math.rendered { white-space: normal; overflow-x: auto; overflow-y: hidden; }
-div.lexmd-math .katex-display { margin: 0.4em 0; }
-.lexmd-math .katex { font-size: 1.12em; }
-.katex-error { color: var(--caution) !important; font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 0.85em; }
-sup.footnote-ref { font-size: 0.72em; margin-left: 0.08em; }
-sup.footnote-ref a { padding: 0 0.12em; }
-section.footnotes {
-  margin-top: 3em;
-  padding-top: 1.2em;
-  border-top: 1px solid var(--hair);
-  font-size: 0.86rem;
-  color: var(--secondary);
-}
-section.footnotes ol { padding-left: 1.3em; margin: 0; }
-section.footnotes li { margin: 0.4em 0; scroll-margin-top: 1.25rem; }
-section.footnotes li p { margin: 0 0 0.4em; }
-a.footnote-back { margin-left: 0.2em; font-size: 0.9em; }
-.properties { margin: 0 0 1.6em; border-bottom: 1px solid var(--hair); padding-bottom: 0.8em; }
-.properties table { width: auto; font-size: 0.84rem; }
-.properties th, .properties td { padding: 0.22em 0; border: none; background: none; vertical-align: baseline; }
-.properties th { padding-right: 1.6em; font-weight: 500; color: var(--secondary); white-space: nowrap; }
-.properties td { color: var(--text); }
-.properties .tag {
-  display: inline-block;
-  margin: 0.1em 0.1em 0.1em 0;
-  padding: 0.05em 0.55em;
-  border-radius: 999px;
-  background: var(--fill-strong);
-  font-size: 0.92em;
-}
-
-"""#
+    static var renderingStyle: String { PreviewStyle.rendering }
 
     static let renderingScript = #"""
 (function () {

@@ -1,4 +1,5 @@
 import AppKit
+import LexMDRendering
 import UniformTypeIdentifiers
 import WebKit
 
