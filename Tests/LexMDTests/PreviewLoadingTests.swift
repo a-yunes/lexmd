@@ -43,6 +43,26 @@ struct PreviewLoadingTests {
         #expect(abs(fraction - 0.5) < 0.02)
     }
 
+    @Test func aRenderSharesOneMathBudget() async throws {
+        let (preview, window) = makePreview()
+        defer { window.contentView = nil }
+        preview.render(html: MarkdownHTML.render("Load $x$."), baseURL: nil, resetScroll: true)
+        try await waitUntil { try await page(preview, "return document.querySelector('.katex') !== null") as? Bool == true }
+
+        // Each block holds new math, so a budget per block would typeset everything at once.
+        let count = 1500
+        let source = (0..<count).map { #"Block $\sum_{k=0}^{n} \frac{k^{\#($0)}}{\sqrt{\#($0) + k}}$."# }.joined(separator: "\n\n")
+        let counts = try #require(try await world(preview, """
+            lexmdRender(html, '', true);
+            return [document.querySelectorAll('.lexmd-math.rendered').length, document.querySelectorAll('.lexmd-math').length];
+            """, ["html": MarkdownHTML.render(source)]) as? [Int])
+        #expect(counts[1] == count)
+        #expect(counts[0] < count, "math past the budget is queued")
+        // The rest is typeset in slices (slow here, as hidden pages throttle timers) or on demand.
+        _ = try await world(preview, "return lexmdRenderAll()")
+        #expect(try await page(preview, "return document.querySelectorAll('.lexmd-math.rendered').length") as? Int == count)
+    }
+
     @Test func metaRefreshInMarkupDoesNotOpenDocuments() async throws {
         let folder = try TestFolder()
         let target = try folder.write("other.md", "# Other\n")
