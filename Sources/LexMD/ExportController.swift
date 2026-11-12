@@ -305,9 +305,21 @@ enum Exporter {
     }
 
     /// A percent-encoded relative URL path from a folder to a file.
+    /// Resolves symlinks through the deepest existing ancestor, so a missing file resolves
+    /// the same way as its existing folder (for example /var and /private/var).
+    nonisolated static func resolved(_ url: URL) -> URL {
+        var existing = url.standardizedFileURL
+        var rest: [String] = []
+        while !FileManager.default.fileExists(atPath: existing.path), existing.pathComponents.count > 1 {
+            rest.insert(existing.lastPathComponent, at: 0)
+            existing.deleteLastPathComponent()
+        }
+        return rest.reduce(existing.resolvingSymlinksInPath()) { $0.appendingPathComponent($1) }
+    }
+
     nonisolated static func relativePath(from folder: URL, to file: URL) -> String {
-        let base = folder.resolvingSymlinksInPath().standardizedFileURL.pathComponents
-        let target = file.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+        let base = resolved(folder).pathComponents
+        let target = resolved(file).pathComponents
         var common = 0
         while common < base.count, common < target.count, base[common] == target[common] { common += 1 }
         var allowed = CharacterSet.urlPathAllowed

@@ -58,8 +58,9 @@ struct EditorHighlightTests {
         var edited: [NSRange] = []
         let observer = NotificationCenter.default.addObserver(
             forName: NSTextStorage.didProcessEditingNotification, object: storage, queue: nil
-        ) { _ in
+        ) { note in
             MainActor.assumeIsolated {
+                guard let storage = note.object as? NSTextStorage else { return }
                 if storage.editedMask == .editedAttributes { edited.append(storage.editedRange) }
             }
         }

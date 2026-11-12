@@ -161,6 +161,15 @@ struct ExportTests {
         #expect(Exporter.relativePath(from: folder, to: URL(fileURLWithPath: "/tmp/LexMD Export/docs/sub/../e.png")) == "e.png")
     }
 
+    @Test func relativePathsToMissingFilesUnderSymlinkedFolders() throws {
+        // Temporary folders live under /var, a symlink to /private/var.
+        let folder = try TestFolder()
+        let out = folder.url.appendingPathComponent("out", isDirectory: true)
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        let missing = folder.url.appendingPathComponent("notes/Missing File.md")
+        #expect(Exporter.relativePath(from: out, to: missing) == "../notes/Missing%20File.md")
+    }
+
     // MARK: Rich text
 
     private static let richMarkdown = """
