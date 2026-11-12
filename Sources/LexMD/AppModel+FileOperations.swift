@@ -26,6 +26,8 @@ final class SidebarFileState {
 final class LinkWriteRecord {
     var files: [RewrittenFile] = []
     var task: Task<Void, Never>?
+    /// The open document's text around its part of the update, which the editor can undo.
+    var openDocument: RewrittenFile?
 }
 
 extension AppModel {
@@ -424,19 +426,27 @@ extension AppModel {
         }
     }
 
-    /// Rewrites links: open documents through the editor (undoable, nothing unsaved is lost),
-    /// other files on disk off the main thread. The whole update is one undo step.
+    /// Rewrites links: the open document through the editor (nothing unsaved is lost), documents
+    /// with unsaved text in other tabs in memory, and other files on disk off the main thread.
+    ///
+    /// The open document's edit is on the editor's undo stack; the files on disk are one step on
+    /// the window's. Undoing that step from the window also undoes the open document's edit while
+    /// it is still the editor's latest change, so the update reverts as a whole either way.
     func applyLinkUpdate(_ plan: LinkUpdatePlan, context: LinkRewriter.Context) {
         let undo = fileUndoManager
         undo?.beginUndoGrouping()
         defer { undo?.endUndoGrouping() }
         var onDisk: [String] = []
         let current = currentFile?.path
+        let record = LinkWriteRecord()
         for file in plan.files {
             let oldPath = context.oldLocation(of: file.path)
             if file.path == current {
+                let before = text
                 let edits = LinkRewriter.edits(in: text, oldPath: oldPath, newPath: file.path, context: context)
-                editor.applyEdits(edits, actionName: "Update Links")
+                if editor.applyEdits(edits, actionName: "Update Links") {
+                    record.openDocument = RewrittenFile(path: file.path, before: before, after: editor.textView.string)
+                }
             } else if let tab = tabStore.list.tabs.first(where: { $0.path == file.path && $0.state.unsavedText != nil }),
                       let unsaved = tab.state.unsavedText {
                 let edits = LinkRewriter.edits(in: unsaved, oldPath: oldPath, newPath: file.path, context: context)
@@ -445,11 +455,13 @@ extension AppModel {
                 onDisk.append(file.path)
             }
         }
-        let record = LinkWriteRecord()
         let paths = onDisk
         record.task = Task { [weak self] in
             let result = await runDetached { LinkUpdater.rewrite(paths, context: context) }
             record.files = result.written
+            // A file may have been opened, or got unsaved text, while it was being rewritten:
+            // update the text in memory too, or autosave would write the old links back.
+            self?.rewriteOpenText(paths, context: context)
             self?.filesDidChange(structure: false, changed: result.written.map(\.path))
             if !result.failed.isEmpty {
                 self?.showFileProblem("Some links couldn’t be updated.", Self.list(result.failed, under: self?.rootURL?.path))
@@ -461,12 +473,38 @@ extension AppModel {
         undo?.setActionName("Update Links")
     }
 
+    /// Applies a link update to the in-memory text of open documents among `paths`. Text that
+    /// already has the new links is left as it is.
+    private func rewriteOpenText(_ paths: [String], context: LinkRewriter.Context) {
+        for path in paths {
+            let oldPath = context.oldLocation(of: path)
+            if path == currentFile?.path {
+                let edits = LinkRewriter.edits(in: text, oldPath: oldPath, newPath: path, context: context)
+                editor.applyEdits(edits, actionName: "Update Links")
+            } else if let tab = tabStore.list.tab(withPath: path), let unsaved = tab.state.unsavedText {
+                let edits = LinkRewriter.edits(in: unsaved, oldPath: oldPath, newPath: path, context: context)
+                if !edits.isEmpty { tabStore.list.update(tab.id) { $0.state.unsavedText = TextEdit.apply(edits, to: unsaved) } }
+            }
+        }
+    }
+
     /// Undo and redo for files rewritten on disk. A file edited since is left alone and reported.
+    /// The open document's part goes along while the editor's latest change is still that edit.
     private func replayLinkWrites(_ record: LinkWriteRecord, forward: Bool) {
         fileUndoManager?.registerUndo(withTarget: self) { model in
             MainActor.assumeIsolated { model.replayLinkWrites(record, forward: !forward) }
         }
         fileUndoManager?.setActionName("Update Links")
+        if let document = record.openDocument, document.path == currentFile?.path {
+            let editorUndo = editor.undoManager
+            if forward, text == document.before, editorUndo.canRedo, editorUndo.redoActionName == "Update Links" {
+                editorUndo.redo()
+            } else if !forward, text == document.after, editorUndo.canUndo, editorUndo.undoActionName == "Update Links" {
+                editorUndo.undo()
+            }
+            // Make sure the model has the editor's text before anything compares it.
+            if editor.textView.string != text { editor.onTextChange?(editor.textView.string) }
+        }
         let previous = record.task
         record.task = Task { [weak self] in
             await previous?.value

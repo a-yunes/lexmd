@@ -292,7 +292,7 @@ struct LinkUpdaterTests {
 
 @MainActor
 struct EditorLinkEditTests {
-    @Test func editsInTheOpenDocumentAreOneUndoStep() throws {
+    @Test func editsInTheOpenDocumentAreOneUndoStep() async throws {
         let editor = EditorController()
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = editor.scrollView
@@ -314,6 +314,11 @@ struct EditorLinkEditTests {
 
         undo.undo()
         #expect(editor.textView.string == original)
+        try await waitUntil { reported == original }
+        undo.redo()
+        try await waitUntil { reported == "[a](guide.md) text [b](guide.md#x)\n" }
+        undo.undo()
+        try await waitUntil { reported == original }
 
         editor.restore(selection: NSRange(location: 500, length: 3), origin: nil)
         #expect(editor.textView.selectedRange() == NSRange(location: (original as NSString).length, length: 0))
