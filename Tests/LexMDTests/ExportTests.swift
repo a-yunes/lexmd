@@ -260,6 +260,97 @@ struct ExportTests {
         #expect(NSAttributedString(rtf: rtf, documentAttributes: nil)?.string == "Just this and that.")
     }
 
+    // MARK: Diagrams and math
+
+    private static let diagramMarkdown = """
+    # Diagrams and Math
+
+    Inline math $e^{i\\pi} + 1 = 0$ sits in this sentence.
+
+    $$
+    \\int_0^1 x^2 \\, dx = \\frac{1}{3}
+    $$
+
+    ```mermaid
+    flowchart LR
+      Start --> Finish
+    ```
+    """
+
+    @Test func htmlExportEmbedsDiagramsMathAndFonts() async throws {
+        let folder = try TestFolder()
+        let destination = folder.url.appendingPathComponent("Math.html")
+        let document = ExportDocument(markdown: Self.diagramMarkdown, baseURL: folder.url, title: "Math")
+        try await Exporter.exportHTML(document, to: destination)
+        let html = try String(contentsOf: destination, encoding: .utf8)
+
+        #expect(html.contains("<svg"), "the diagram is exported as SVG")
+        #expect(html.contains("lexmd-diagram-view"))
+        #expect(!html.contains("Diagram error"))
+        #expect(html.contains(#"class="katex""#) && html.contains("katex-display"))
+        #expect(html.contains("application/x-tex"), "math keeps its MathML and TeX annotation")
+        #expect(html.contains("src:url(data:font/woff2;base64,"))
+        #expect(html.contains("font-family:KaTeX_Main"))
+        #expect(!html.contains("font-family:KaTeX_Fraktur;font-style"), "unused font families are not embedded")
+        let embedded = html.components(separatedBy: "data:font/woff2;base64,").count - 1
+        #expect(embedded > 0 && embedded < 20, "embedded fonts: \(embedded)")
+        #expect(!html.contains("lexmd-vendor:") && !html.contains("lexmd-doc:"))
+        #expect(!html.lowercased().contains("<script"))
+        // Diagram colors follow the color scheme in the standalone page.
+        #expect(html.contains("--pele-fg: var(--text)") && html.contains("--diagram-bg: #1c1c1e"))
+
+        // Without math, KaTeX's stylesheet is left out.
+        let plain = folder.url.appendingPathComponent("Plain.html")
+        try await Exporter.exportHTML(ExportDocument(markdown: "# Plain\n\nNo math.", baseURL: folder.url, title: "Plain"), to: plain)
+        let plainHTML = try String(contentsOf: plain, encoding: .utf8)
+        #expect(!plainHTML.contains("KaTeX") && !plainHTML.contains("lexmd-vendor:"))
+    }
+
+    @Test func pdfExportIncludesMathAndDiagrams() async throws {
+        let folder = try TestFolder()
+        let destination = folder.url.appendingPathComponent("Math.pdf")
+        let document = ExportDocument(markdown: Self.diagramMarkdown, baseURL: folder.url, title: "Math")
+        try await Exporter.exportPDF(document, to: destination)
+        let pdf = try #require(PDFDocument(url: destination))
+        let text = (pdf.string ?? "").replacingOccurrences(of: "\u{00A0}", with: " ")
+        #expect(text.contains("Diagrams and Math"))
+        #expect(text.contains("Start") && text.contains("Finish"), "diagram labels are printed")
+        #expect(text.contains("π") || text.contains("𝜋"), "inline math is typeset: \(text)")
+        #expect(text.contains("∫"), "display math is typeset")
+        #expect(!text.contains("Diagram error") && !text.contains("not available"))
+        #expect(!text.contains("$$") && !text.contains("\\int"), "no raw TeX is left")
+    }
+
+    @Test func printRenderingLoadsKaTeXFontsAndUsesLightDiagrams() async throws {
+        let folder = try TestFolder()
+        let renderer = OffscreenRenderer(allowsRemoteContent: false)
+        try await renderer.load(ExportDocument(markdown: Self.diagramMarkdown, baseURL: folder.url, title: "Math"), forPrint: true)
+        let loaded = try await renderer.preview.evaluate("""
+            return Array.from(document.fonts).filter(function (f) { return f.family.indexOf('KaTeX') >= 0 && f.status === 'loaded'; }).length
+            """) as? Int ?? 0
+        #expect(loaded > 0, "KaTeX fonts are loaded before printing")
+        #expect(try await renderer.preview.evaluate("return document.fonts.status") as? String == "loaded")
+        let background = try await renderer.preview.evaluate(
+            "return getComputedStyle(document.querySelector('.lexmd-diagram-view')).backgroundColor"
+        ) as? String
+        #expect(background == "rgb(255, 255, 255)")
+    }
+
+    @Test func kaTeXFontEmbeddingKeepsOnlyUsedFamilies() {
+        let css = """
+        .katex{font:normal 1.21em KaTeX_Main}\
+        @font-face{font-display:block;font-family:KaTeX_Main;font-style:normal;font-weight:400;src:url(lexmd-vendor:///katex/fonts/KaTeX_Main-Regular.woff2) format("woff2"),url(lexmd-vendor:///katex/fonts/KaTeX_Main-Regular.woff) format("woff")}\
+        @font-face{font-display:block;font-family:KaTeX_Script;font-style:normal;font-weight:400;src:url(lexmd-vendor:///katex/fonts/KaTeX_Script-Regular.woff2) format("woff2")}\
+        @font-face{font-family:KaTeX_Main;font-weight:700;src:url(lexmd-vendor:///katex/fonts/Missing.woff2) format("woff2")}
+        """
+        let output = Exporter.embedKaTeXFonts(css, families: ["KaTeX_Main"])
+        #expect(output.hasPrefix(".katex{font:normal 1.21em KaTeX_Main}"))
+        #expect(output.components(separatedBy: "@font-face").count - 1 == 1, "missing files and unused families are dropped")
+        #expect(output.contains("src:url(data:font/woff2;base64,"))
+        #expect(!output.contains("lexmd-vendor:") && !output.contains("KaTeX_Script"))
+        #expect(Exporter.withoutAppURLs("a{b:url(lexmd-doc:///x.png)} c{d:url( 'lexmd-vendor:///y')}") == "a{b:url(data:,)} c{d:url(data:,)}")
+    }
+
     // MARK: Commands
 
     @Test func defaultShortcutsDoNotClash() {

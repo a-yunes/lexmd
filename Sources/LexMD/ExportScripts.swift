@@ -1,9 +1,9 @@
 /// Script bodies for export, print, and rich text copy. They run with `callAsyncJavaScript` in
 /// LexMD's content world, never in the page world where document markup lives.
 enum ExportScripts {
-    /// Waits for LexMD's rendering to finish. A renderer that draws asynchronously can expose
-    /// `window.lexmdWhenRendered()` returning a promise; otherwise the content counts as rendered
-    /// once it stops changing. With `eager`, images load immediately, every image is awaited, and
+    /// Waits for LexMD's rendering to finish: queued diagrams and math are rendered at once with
+    /// `lexmdRenderAll()`, an optional `lexmdWhenRendered()` promise is awaited, and the content
+    /// must stop changing. With `eager`, images load immediately, every image is awaited, and
     /// collapsed details open so printouts show everything.
     static let settle = #"""
 var content = document.getElementById('content');
@@ -13,6 +13,9 @@ function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 if (eager) {
   content.querySelectorAll('img[loading]').forEach(function (img) { img.removeAttribute('loading'); });
   content.querySelectorAll('details').forEach(function (d) { d.open = true; });
+}
+if (typeof lexmdRenderAll === 'function') {
+  try { await lexmdRenderAll(); } catch (e) {}
 }
 if (typeof window.lexmdWhenRendered === 'function') {
   try { await Promise.race([Promise.resolve(window.lexmdWhenRendered()), sleep(left())]); } catch (e) {}
@@ -33,7 +36,9 @@ if (eager) {
     })), sleep(left())]);
   }
 }
-if (document.fonts && document.fonts.ready) await Promise.race([document.fonts.ready, sleep(Math.min(left(), 2000))]);
+// Layout starts loading the fonts the content uses (such as KaTeX's); then wait for them.
+void content.offsetHeight;
+if (document.fonts && document.fonts.ready) await Promise.race([document.fonts.ready, sleep(Math.min(left(), 4000))]);
 if (eager) {
   // Keep each heading on the same page as the short block after it. Print engines often
   // ignore break-after: avoid, but honor break-inside: avoid on a wrapper.
@@ -63,6 +68,13 @@ var XHTML = 'http://www.w3.org/1999/xhtml';
 var DROP = { script: 1, iframe: 1, frame: 1, frameset: 1, object: 1, embed: 1, applet: 1, base: 1, meta: 1, link: 1,
   noscript: 1, template: 1, xmp: 1, noembed: 1, noframes: 1, plaintext: 1, portal: 1,
   set: 1, animate: 1, animatemotion: 1, animatetransform: 1 };
+
+// Finishes any diagrams and math still queued in the preview.
+async function lexmdFinish() {
+  if (typeof lexmdRenderAll === 'function') {
+    try { await lexmdRenderAll(); } catch (e) {}
+  }
+}
 
 function lexmdClone(useSelection) {
   var holder = inert.createElement('div');
@@ -129,6 +141,7 @@ function lexmdEachURL(root, visit) {
     /// Serializes the rendered document for a standalone HTML file. Local references become
     /// numbered tokens that the app replaces with data URIs or relative paths.
     static let exportHTML = #"""
+await lexmdFinish();
 var holder = lexmdClone(false).holder;
 lexmdScrub(holder);
 var resources = [];
@@ -137,17 +150,32 @@ lexmdEachURL(holder, function (el, name, raw, abs) {
   el.setAttribute(name, nonce + resources.length + ';');
   resources.push({ url: abs, image: name === 'src' && el.localName === 'img' });
 });
-var css = Array.prototype.map.call(document.querySelectorAll('head style'), function (s) { return s.textContent; }).join('\n');
-return { html: holder.innerHTML, css: css, resources: resources };
+var css = Array.prototype.map.call(document.querySelectorAll('head style:not(#lexmd-katex)'), function (s) { return s.textContent; }).join('\n');
+// KaTeX's stylesheet is only needed with math, and only the font families the math uses.
+var katexStyle = document.getElementById('lexmd-katex');
+var fonts = new Set();
+if (katexStyle && content.querySelector('.katex')) {
+  content.querySelectorAll('.katex, .katex *').forEach(function (el) {
+    var family = getComputedStyle(el).fontFamily.split(',')[0].trim().replace(/["']/g, '');
+    if (/^KaTeX_/.test(family)) fonts.add(family);
+  });
+}
+return {
+  html: holder.innerHTML, css: css, resources: resources,
+  katex: fonts.size ? katexStyle.textContent : '', fonts: Array.from(fonts)
+};
 """#
 
     /// Captures the selection or the whole document as styled HTML (with inline styles that
     /// survive pasting into Mail, Pages, Notes, and web editors), HTML for RTF, and plain text.
     static let copy = #"""
+await lexmdFinish();
 var picked = lexmdClone(useSelection);
 var holder = picked.holder;
 lexmdScrub(holder);
 holder.querySelectorAll('style, .lang').forEach(function (n) { n.remove(); });
+// Without KaTeX's stylesheet only its MathML reads correctly, so the styled copy is dropped.
+holder.querySelectorAll('.katex-html').forEach(function (n) { n.remove(); });
 lexmdEachURL(holder, function (el, name, raw, abs) {
   if (abs.indexOf('lexmd-doc:///') === 0) {
     var u = new URL(abs);

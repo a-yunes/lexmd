@@ -186,11 +186,14 @@ enum Exporter {
             Resource(url: $0["url"] as? String ?? "", isImage: $0["image"] as? Bool ?? false)
         }
         let (replacements, linked) = await runDetached { resolve(resources, folder: folder, limits: limits) }
+        let katex = result["katex"] as? String ?? ""
+        let families = Set(result["fonts"] as? [String] ?? [])
+        let math = katex.isEmpty ? "" : await runDetached { embedKaTeXFonts(katex, families: families) }
         var html = body
         for (index, value) in replacements.enumerated() {
             html = html.replacingOccurrences(of: "\(nonce)\(index);", with: MarkdownHTML.escape(value))
         }
-        let style = (css + "\n" + exportCSS).replacingOccurrences(of: "</", with: "<\\/")
+        let style = withoutAppURLs([css, math, exportCSS].joined(separator: "\n")).replacingOccurrences(of: "</", with: "<\\/")
         let page = """
         <!doctype html>
         <html>
@@ -228,6 +231,42 @@ enum Exporter {
     #content { padding-bottom: 4rem; }
     .codeblock:hover .lang { opacity: 1; }
     """
+
+    /// KaTeX's stylesheet with the font faces of `families` embedded as WOFF2 data URIs and
+    /// every other font face removed.
+    nonisolated static func embedKaTeXFonts(_ css: String, families: Set<String>) -> String {
+        guard let fontFace = try? NSRegularExpression(pattern: #"@font-face\s*\{[^}]*\}"#) else { return css }
+        var output = ""
+        var last = css.startIndex
+        for match in fontFace.matches(in: css, range: NSRange(css.startIndex..., in: css)) {
+            guard let range = Range(match.range, in: css) else { continue }
+            output += css[last..<range.lowerBound]
+            last = range.upperBound
+            let rule = String(css[range])
+            guard let family = capture(#"font-family:\s*["']?([^;"'}]+)"#, in: rule),
+                  families.contains(family.trimmingCharacters(in: .whitespaces)),
+                  let path = capture(#"url\(\s*["']?lexmd-vendor:///([^)"'\s]+\.woff2)"#, in: rule),
+                  let file = VendorAssets.file(at: path), let data = try? Data(contentsOf: file),
+                  let source = rule.range(of: #"src:[^;}]*"#, options: .regularExpression) else { continue }
+            output += rule.replacingCharacters(
+                in: source, with: "src:url(data:font/woff2;base64,\(data.base64EncodedString())) format(\"woff2\")"
+            )
+        }
+        output += css[last...]
+        return output
+    }
+
+    private nonisolated static func capture(_ pattern: String, in text: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let range = Range(match.range(at: 1), in: text) else { return nil }
+        return String(text[range])
+    }
+
+    /// Replaces any remaining reference to LexMD's own URL schemes, which only work inside the app.
+    nonisolated static func withoutAppURLs(_ css: String) -> String {
+        css.replacingOccurrences(of: #"url\(\s*["']?lexmd-(vendor|doc):[^)]*\)"#, with: "url(data:,)", options: .regularExpression)
+    }
 
     struct Resource: Sendable {
         var url: String

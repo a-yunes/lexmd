@@ -267,6 +267,8 @@ mark.lexmd-hit.current {
     --kw: #ad3da4; --str: #c41a16; --com: #707f8c; --num: #1c00cf;
     --type: #0b4f79; --fn: #326d74; --attr: #815f03;
     --ins: #1f7a35; --del: #b4232a; --hunk: #6c4fbb;
+    --diagram-bg: #ffffff !important; --diagram-surface: #f5f5f7 !important;
+    --diagram-surface-alt: #e8e8ed !important; --diagram-border: #b8b8bf !important;
   }
   html { font-size: 11pt !important; }
   html, body { background: #fff !important; color: var(--text); }
@@ -276,9 +278,9 @@ mark.lexmd-hit.current {
   h1 + p { color: var(--text); }
   p, li, dd, blockquote { orphans: 3; widows: 3; }
   a { color: var(--accent); text-decoration: underline; text-decoration-thickness: 0.5pt; }
-  img, video, svg, figure, tr, .callout, li.task, kbd { break-inside: avoid; page-break-inside: avoid; }
+  img, video, svg, figure, tr, .callout, li.task, kbd, .lexmd-diagram-view, div.lexmd-math { break-inside: avoid; page-break-inside: avoid; }
   img, video { box-shadow: none !important; }
-  .codeblock, .table-wrap, .callout, pre.frontmatter, details, :not(pre) > code, th, mark, li.task > input[type=checkbox] {
+  .codeblock, .table-wrap, .callout, pre.frontmatter, details, :not(pre) > code, th, mark, li.task > input[type=checkbox], .lexmd-diagram-view {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
