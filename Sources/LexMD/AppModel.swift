@@ -347,7 +347,7 @@ final class AppModel {
     /// The word count and reading time shown under the document's title.
     static func readingSummary(words: Int) -> String {
         let minutes = max(1, Int((Double(words) / 230).rounded()))
-        return String(AttributedString(localized: "^[\(words) word](inflect: true) · \(minutes) min read").characters)
+        return "\(counted(words, "word")) · \(minutes) min read"
     }
 
     func updateDisplayTree() {

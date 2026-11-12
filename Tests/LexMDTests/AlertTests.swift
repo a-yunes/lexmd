@@ -149,3 +149,14 @@ extension TabCommandTests {
         model.closeTabsForProjectChange()
     }
 }
+
+@MainActor
+struct CountedTests {
+    @Test func countsUseTheMatchingNounForm() {
+        #expect(counted(1, "word") == "1 word")
+        #expect(counted(0, "word") == "0 words")
+        #expect(counted(1234, "word") == "1,234 words")
+        #expect(counted(2, "match", plural: "matches") == "2 matches")
+        #expect(AppModel.readingSummary(words: 1) == "1 word · 1 min read")
+    }
+}
