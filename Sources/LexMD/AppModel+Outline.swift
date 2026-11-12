@@ -98,6 +98,10 @@ final class OutlineModel {
     /// All links to the document; `backlinks` lists at most `Backlink.limit` of them.
     private(set) var backlinkCount = 0
     private(set) var problems: [LinkProblem] = []
+    /// Whether the panel has anything to show: more than one heading, a backlink, or a broken
+    /// link. It changes only when an analysis or the index reports on the open document, so
+    /// switching documents keeps the previous answer until the new one is known.
+    private(set) var hasContent = false
     let index = LinkIndex()
 
     @ObservationIgnored private(set) var documentPath: String?
@@ -112,23 +116,44 @@ final class OutlineModel {
     @ObservationIgnored var previewSlug: String?
     @ObservationIgnored private var headingCache: (source: String, headings: [HeadingInfo])?
 
-    func apply(_ analysis: OutlineAnalysis, path: String) {
+    /// The analysis of the open document, with the number of links to it from the index.
+    func apply(_ analysis: OutlineAnalysis, path: String, incomingLinks: Int) {
         if documentPath != path { currentHeading = nil }
+        if backlinksPath != path, backlinksPath != nil { setBacklinks([], references: [], path: nil) }
         documentPath = path
         if headings != analysis.headings { headings = analysis.headings }
         if problems != analysis.problems { problems = analysis.problems }
         if let current = currentHeading, current >= headings.count { currentHeading = nil }
+        setIncomingLinks(incomingLinks)
     }
 
     func setBacklinks(_ links: [Backlink], references: [LinkReference], path: String?) {
         backlinksPath = path
         backlinkReferences = references
         if backlinks != links { backlinks = links }
-        if backlinkCount != references.count { backlinkCount = references.count }
+        setIncomingLinks(references.count)
+    }
+
+    /// The number of links to the open document, known from the index before backlinks load.
+    func setIncomingLinks(_ count: Int) {
+        if backlinkCount != count { backlinkCount = count }
+        let content = Self.hasContent(headings: headings.count, backlinks: backlinkCount, problems: problems.count)
+        if hasContent != content { hasContent = content }
+    }
+
+    /// One heading alone is not worth an outline; links and problems always are.
+    nonisolated static func hasContent(headings: Int, backlinks: Int, problems: Int) -> Bool {
+        headings > 1 || backlinks > 0 || problems > 0
     }
 
     func needsBacklinks(_ references: [LinkReference], path: String) -> Bool {
         backlinksPath != path || backlinkReferences != references
+    }
+
+    /// Forgets the outline when no document is open.
+    func close() {
+        clear()
+        if hasContent { hasContent = false }
     }
 
     func clear() {
@@ -178,13 +203,20 @@ extension AppModel {
         outline.completion = completion
     }
 
+    /// The panel shows when the reader wants it and the document has something to show; the
+    /// preference is kept for documents that do.
+    var showsOutlinePanel: Bool { isOutlineVisible && canShowOutline }
+
+    /// Show/Hide Outline is available only for documents with an outline, backlinks, or problems.
+    var canShowOutline: Bool { currentFile != nil && outline.hasContent }
+
     func toggleOutline() {
+        guard canShowOutline else { NSSound.beep(); return }
         withAnimation(.snappy(duration: 0.25)) { isOutlineVisible.toggle() }
     }
 
     func outlineVisibilityChanged() {
-        guard isOutlineVisible else { return }
-        if outline.documentPath != currentFile?.path { outline.clear() }
+        guard isOutlineVisible, currentFile != nil else { return }
         scheduleOutlineUpdate(debounce: false)
         updateBacklinks()
     }
@@ -226,6 +258,9 @@ extension AppModel {
             // Wiki links and anchors in the preview may resolve differently now.
             render(debounce: false)
         }
+        if let path = currentFile?.path, outline.documentPath == path {
+            outline.setIncomingLinks(snapshot.incoming[path]?.count ?? 0)
+        }
         updateBacklinks()
     }
 
@@ -244,21 +279,23 @@ extension AppModel {
 
     // MARK: Analysis
 
+    /// Analyzes the open document. This runs while the panel is hidden too, less often, since
+    /// whether the panel can be shown depends on it.
     func scheduleOutlineUpdate(debounce: Bool) {
         outline.analysisTask?.cancel()
-        guard let path = currentFile?.path else { outline.clear(); return }
-        guard isOutlineVisible else { return }
+        guard let path = currentFile?.path else { outline.close(); return }
         if outline.backlinksPath != path { updateBacklinks() }
         let source = text
         let context = linkContext(for: source)
+        let delay: Duration = isOutlineVisible ? .milliseconds(250) : .seconds(1)
         outline.analysisTask = Task { [weak self] in
             if debounce {
-                try? await Task.sleep(for: .milliseconds(250))
+                try? await Task.sleep(for: delay)
                 guard !Task.isCancelled else { return }
             }
             let analysis = await runDetached { OutlineAnalysis.make(source: source, context: context) }
             guard let self, !Task.isCancelled, self.currentFile?.path == path else { return }
-            self.outline.apply(analysis, path: path)
+            self.outline.apply(analysis, path: path, incomingLinks: self.outline.index.snapshot.incoming[path]?.count ?? 0)
             self.refreshCurrentHeading()
         }
     }

@@ -18,20 +18,27 @@ struct OutlinePanel: View {
             } else {
                 ScrollViewReader { proxy in
                     List {
-                        Section(isExpanded: $showsHeadings) {
-                            headingRows(outline)
-                        } header: {
-                            SectionHeader(title: "Outline", count: nil)
+                        let sections = OutlineSections(outline)
+                        if sections.headings {
+                            Section(isExpanded: $showsHeadings) {
+                                headingRows(outline)
+                            } header: {
+                                SectionHeader(title: "Outline", count: nil)
+                            }
                         }
-                        Section(isExpanded: $showsBacklinks) {
-                            backlinkRows(outline)
-                        } header: {
-                            SectionHeader(title: "Linked From", count: outline.backlinkCount)
+                        if sections.backlinks {
+                            Section(isExpanded: $showsBacklinks) {
+                                backlinkRows(outline)
+                            } header: {
+                                SectionHeader(title: "Linked From", count: outline.backlinkCount)
+                            }
                         }
-                        Section(isExpanded: $showsProblems) {
-                            problemRows(outline)
-                        } header: {
-                            SectionHeader(title: "Problems", count: outline.problems.count)
+                        if sections.problems {
+                            Section(isExpanded: $showsProblems) {
+                                problemRows(outline)
+                            } header: {
+                                SectionHeader(title: "Problems", count: outline.problems.count)
+                            }
                         }
                     }
                     .listStyle(.sidebar)
@@ -47,43 +54,38 @@ struct OutlinePanel: View {
 
     @ViewBuilder
     private func headingRows(_ outline: OutlineModel) -> some View {
-        if outline.headings.isEmpty {
-            Text("No headings").foregroundStyle(.secondary)
-        } else {
-            let minLevel = outline.headings.map(\.level).min() ?? 1
-            ForEach(outline.headings) { heading in
-                let current = outline.currentHeading == heading.id
-                Button { model.revealHeading(heading) } label: {
-                    Text(heading.title.isEmpty ? "Untitled" : heading.title)
-                        .font(.system(size: 12.5, weight: heading.level == minLevel ? .semibold : .regular))
-                        .foregroundStyle(current ? Color.accentColor : (heading.level - minLevel >= 2 ? Color.secondary : Color.primary))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .padding(.leading, CGFloat(min(heading.level - minLevel, 5)) * 12)
-                        .padding(.vertical, 2)
-                        .padding(.horizontal, 6)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(current ? Color.accentColor.opacity(0.14) : Color.clear)
-                        )
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .id("heading-\(heading.id)")
-                .help(heading.title)
-                .accessibilityLabel("\(heading.title), heading level \(heading.level)")
-                .accessibilityAddTraits(current ? .isSelected : [])
+        let minLevel = outline.headings.map(\.level).min() ?? 1
+        ForEach(outline.headings) { heading in
+            let current = outline.currentHeading == heading.id
+            Button { model.revealHeading(heading) } label: {
+                Text(heading.title.isEmpty ? "Untitled" : heading.title)
+                    .font(.system(size: 12.5, weight: heading.level == minLevel ? .semibold : .regular))
+                    .foregroundStyle(current ? Color.accentColor : (heading.level - minLevel >= 2 ? Color.secondary : Color.primary))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.leading, CGFloat(min(heading.level - minLevel, 5)) * 12)
+                    .padding(.vertical, 2)
+                    .padding(.horizontal, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(current ? Color.accentColor.opacity(0.14) : Color.clear)
+                    )
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .id("heading-\(heading.id)")
+            .help(heading.title)
+            .accessibilityLabel("\(heading.title), heading level \(heading.level)")
+            .accessibilityAddTraits(current ? .isSelected : [])
         }
     }
 
     @ViewBuilder
     private func backlinkRows(_ outline: OutlineModel) -> some View {
         if outline.backlinks.isEmpty {
-            Text(model.rootURL == nil ? "Open a folder to find links."
-                : outline.index.isBuilding ? "Finding links…" : "No other documents link here.")
-                .foregroundStyle(.secondary)
+            // The index counted links that are still being read.
+            Text("Finding links…").foregroundStyle(.secondary)
         } else {
             ForEach(outline.backlinks) { link in
                 Button { model.openBacklink(link) } label: {
@@ -117,36 +119,51 @@ struct OutlinePanel: View {
 
     @ViewBuilder
     private func problemRows(_ outline: OutlineModel) -> some View {
-        if outline.problems.isEmpty {
-            Label("No broken links", systemImage: "checkmark.circle")
-                .foregroundStyle(.secondary)
-        } else {
-            ForEach(outline.problems) { problem in
-                Button { model.selectProblem(problem) } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
+        ForEach(outline.problems) { problem in
+            Button { model.selectProblem(problem) } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.system(size: 11))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(problem.message)
+                            .font(.system(size: 12))
+                            .lineLimit(2)
+                        Text("Line \(problem.line) · \(problem.target)")
                             .font(.system(size: 11))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(problem.message)
-                                .font(.system(size: 12))
-                                .lineLimit(2)
-                            Text("Line \(problem.line) · \(problem.target)")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                        Spacer(minLength: 0)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
-                    .padding(.vertical, 2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                    Spacer(minLength: 0)
                 }
-                .buttonStyle(.plain)
-                .help("Select in the editor")
+                .padding(.vertical, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .help("Select in the editor")
         }
+    }
+}
+
+/// Which sections the panel shows: each only when it has something in it.
+struct OutlineSections: Equatable {
+    var headings: Bool
+    var backlinks: Bool
+    var problems: Bool
+
+    init(headings: Bool, backlinks: Bool, problems: Bool) {
+        self.headings = headings
+        self.backlinks = backlinks
+        self.problems = problems
+    }
+
+    @MainActor
+    init(_ outline: OutlineModel) {
+        headings = outline.headings.count > 1
+        backlinks = outline.backlinkCount > 0
+        problems = !outline.problems.isEmpty
     }
 }
 
@@ -177,12 +194,12 @@ private struct OutlinePlacement: ViewModifier {
 
     func body(content: Content) -> some View {
         HStack(spacing: 0) {
-            if edge == .leading, model.isOutlineVisible {
+            if edge == .leading, model.showsOutlinePanel {
                 panel
                 divider
             }
             content
-            if edge == .trailing, model.isOutlineVisible {
+            if edge == .trailing, model.showsOutlinePanel {
                 divider
                 panel
             }
@@ -233,6 +250,5 @@ struct OutlineToolbarButton: View {
             Label(model.isOutlineVisible ? "Hide Outline" : "Show Outline", systemImage: "list.bullet.indent")
         }
         .help("Show or hide the outline and links \(model.shortcut(for: .toggleOutline).map { "(\($0.display))" } ?? "")")
-        .disabled(model.currentFile == nil && !model.isOutlineVisible)
     }
 }

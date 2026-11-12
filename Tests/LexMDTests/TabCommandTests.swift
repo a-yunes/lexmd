@@ -164,6 +164,54 @@ struct TabCommandTests {
         model.closeTabsForProjectChange()
     }
 
+    /// The outline panel, its toolbar button, and Show/Hide Outline follow what the document has
+    /// to show, while the reader's preference to show the panel is kept.
+    @Test func outlineShowsOnlyForDocumentsWithContent() async throws {
+        let folder = try TestFolder()
+        try folder.write("plain.md", "# Only\n\nText.\n")
+        try folder.write("long.md", "# One\n\n## Two\n")
+        try folder.write("linked.md", "# Linked\n")
+        try folder.write("linker.md", "# Linker\n\nSee [it](linked.md).\n")
+        try folder.write("broken.md", "# Broken\n\n[gone](missing.md)\n")
+        let model = AppModel.shared
+        let wasVisible = model.isOutlineVisible
+        defer { model.isOutlineVisible = wasVisible }
+        model.isOutlineVisible = true
+        model.open(folder.url)
+        try await waitUntil { model.tree.count == 5 && !model.outline.index.isBuilding && model.outline.index.snapshot.markdownPaths.count == 5 }
+        let path = { FileScanner.canonicalPath(folder.url.appendingPathComponent($0).path) }
+        func show(_ name: String) async throws {
+            model.open(URL(fileURLWithPath: path(name)))
+            try await waitUntil { model.outline.documentPath == path(name) }
+        }
+
+        try await show("long.md")
+        #expect(model.canShowOutline && model.showsOutlinePanel)
+        #expect(OutlineSections(model.outline) == OutlineSections(headings: true, backlinks: false, problems: false))
+
+        // Until the new document is analyzed, the previous answer stands, so nothing flickers.
+        model.open(URL(fileURLWithPath: path("plain.md")))
+        #expect(model.canShowOutline)
+        try await waitUntil { model.outline.documentPath == path("plain.md") }
+        #expect(!model.canShowOutline && !model.showsOutlinePanel)
+        #expect(model.isOutlineVisible, "the preference is kept")
+        model.toggleOutline()
+        #expect(model.isOutlineVisible, "Show/Hide Outline does nothing without content")
+
+        try await show("linked.md")
+        #expect(model.showsOutlinePanel)
+        #expect(OutlineSections(model.outline) == OutlineSections(headings: false, backlinks: true, problems: false))
+        try await show("broken.md")
+        #expect(model.showsOutlinePanel)
+        #expect(OutlineSections(model.outline) == OutlineSections(headings: false, backlinks: false, problems: true))
+
+        // Hiding is remembered for documents with content.
+        model.toggleOutline()
+        #expect(!model.isOutlineVisible && model.canShowOutline && !model.showsOutlinePanel)
+        model.closeTabsForProjectChange()
+        #expect(!model.canShowOutline)
+    }
+
     private static func table(in view: NSView) -> NSTableView? {
         if let table = view as? NSTableView { return table }
         for sub in view.subviews { if let found = table(in: sub) { return found } }

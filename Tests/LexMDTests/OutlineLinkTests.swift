@@ -504,6 +504,26 @@ struct OutlineLinkTests {
         #expect(textView.string.hasSuffix("[[A\n- "))
     }
 
+    @Test func outlineContentRules() {
+        #expect(!OutlineModel.hasContent(headings: 0, backlinks: 0, problems: 0))
+        #expect(!OutlineModel.hasContent(headings: 1, backlinks: 0, problems: 0), "one heading is not an outline")
+        #expect(OutlineModel.hasContent(headings: 2, backlinks: 0, problems: 0))
+        #expect(OutlineModel.hasContent(headings: 1, backlinks: 1, problems: 0))
+        #expect(OutlineModel.hasContent(headings: 0, backlinks: 0, problems: 1))
+
+        let model = OutlineModel()
+        var analysis = OutlineAnalysis()
+        analysis.headings = [OutlineHeading(id: 0, level: 1, title: "A", slug: "a", line: 1, range: NSRange(location: 0, length: 3))]
+        model.apply(analysis, path: "/p/a.md", incomingLinks: 0)
+        #expect(!model.hasContent)
+        #expect(OutlineSections(model) == OutlineSections(headings: false, backlinks: false, problems: false))
+        model.setIncomingLinks(2)
+        #expect(model.hasContent)
+        #expect(OutlineSections(model) == OutlineSections(headings: false, backlinks: true, problems: false))
+        model.close()
+        #expect(!model.hasContent)
+    }
+
     // MARK: Preview
 
     @Test func previewRevealsAndReportsHeadings() async throws {

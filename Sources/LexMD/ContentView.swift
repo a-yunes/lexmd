@@ -73,8 +73,10 @@ extension ContentView {
         ToolbarItem(placement: .primaryAction) {
             ViewModePicker()
         }
-        ToolbarItem(placement: .primaryAction) {
-            OutlineToolbarButton()
+        if model.canShowOutline {
+            ToolbarItem(placement: .primaryAction) {
+                OutlineToolbarButton()
+            }
         }
         if trailingSidebar {
             ToolbarItem(placement: .primaryAction) {
