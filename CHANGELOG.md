@@ -8,8 +8,9 @@
 - Outline panel (⌥⌘O) with the headings of the document, the documents that link to it, and any
   broken links. Wiki links (`[[Name]]`, `[[Name|label]]`, `[[Name#Heading]]`) open the matching
   document, and the editor suggests files, images and headings while you type a link.
-- Tabs: Command-click a file, choose Open in New Tab, or press ⌘↩ in Open Quickly. Open tabs
-  return when the project opens again.
+- Tabs: press ⌘T or the + button to pick a file for a new tab, Command-click a file, choose Open
+  in New Tab, or press ⌘↩ in Open Quickly. Open tabs return when the project opens again.
+- Open Quickly matches names typed with their extension, such as `readme.md`.
 - Create, rename, duplicate, move and trash files and folders in the sidebar. Renaming or moving
   a document offers to update every link to it, and the change can be undone.
 - Export as PDF (⇧⌘E) or HTML, Print (⌥⌘P), and Copy as Rich Text (⌥⌘C), with diagrams and math
@@ -19,8 +20,9 @@
   table cells and keeps columns aligned.
 - Focus Mode (⌥⌘F), Typewriter Scrolling, and spelling and grammar settings that skip code and links.
 - In Git repositories, the sidebar marks changed files and Commit… (⌥⌘K) shows the branch, the
-  author the commit will use, the changed files with diffs, and a message field. It commits only
-  the files you pick and never contacts a remote. Git features stay hidden outside repositories.
+  author the commit will use, the changed Markdown files and images with diffs, and a message
+  field. It appears only when there are such changes, commits only the files you pick, and never
+  contacts a remote. Git features stay hidden outside repositories.
 - Quick Look previews of Markdown files in Finder, a `lexmd` command (LexMD > Install Command
   Line Tool…), and Shortcuts actions: Open in LexMD, Create Note, and Get Current Document.
 
