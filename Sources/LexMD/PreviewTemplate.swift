@@ -257,6 +257,36 @@ mark.lexmd-hit.current {
 .tok-ins { color: var(--ins); }
 .tok-del { color: var(--del); }
 .tok-hunk { color: var(--hunk); }
+/* Printing and PDF export: light colors, full width, and page breaks that keep blocks readable. */
+@media print {
+  :root {
+    --text: #1d1d1f; --secondary: #6e6e73; --tertiary: #8e8e93; --accent: #0066cc;
+    --hair: rgba(0, 0, 0, 0.12); --hair-strong: rgba(0, 0, 0, 0.2);
+    --fill: rgba(0, 0, 0, 0.035); --fill-strong: rgba(0, 0, 0, 0.06);
+    --kw: #ad3da4; --str: #c41a16; --com: #707f8c; --num: #1c00cf;
+    --type: #0b4f79; --fn: #326d74; --attr: #815f03;
+    --ins: #1f7a35; --del: #b4232a; --hunk: #6c4fbb;
+  }
+  html { font-size: 11pt !important; }
+  html, body { background: #fff !important; color: var(--text); }
+  #content { max-width: none; margin: 0; padding: 0; }
+  #content:empty::before, #lexmd-scroll, .codeblock .copy, .codeblock .lang { display: none !important; }
+  h1, h2, h3, h4, h5, h6 { break-after: avoid; page-break-after: avoid; break-inside: avoid; }
+  h1 + p { color: var(--text); }
+  p, li, dd, blockquote { orphans: 3; widows: 3; }
+  a { color: var(--accent); text-decoration: underline; text-decoration-thickness: 0.5pt; }
+  img, video, svg, figure, tr, .callout, li.task, kbd { break-inside: avoid; page-break-inside: avoid; }
+  img, video { box-shadow: none !important; }
+  .codeblock, .table-wrap, .callout, pre.frontmatter, details, :not(pre) > code, th, mark, li.task > input[type=checkbox] {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .codeblock pre, pre.frontmatter { overflow: visible; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .table-wrap { overflow: visible; border-radius: 0; border: none; }
+  table { border: 1px solid var(--hair-strong); }
+  thead { display: table-header-group; }
+  mark.lexmd-hit, mark.lexmd-hit.current { background: none; box-shadow: none; padding: 0; margin: 0; }
+}
 </style>
 </head>
 <body>

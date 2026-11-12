@@ -118,6 +118,14 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         call("lexmdZoom(s)", ["s": value])
     }
 
+    /// True once the page has loaded; renders requested before that have been sent to it.
+    var isPageLoaded: Bool { isLoaded }
+
+    /// Runs a script body in LexMD's content world after any pending render, and returns its result.
+    func evaluate(_ body: String, _ arguments: [String: Any] = [:]) async throws -> Any? {
+        try await webView.callAsyncJavaScript(body, arguments: arguments, in: nil, contentWorld: Self.world)
+    }
+
     /// Runs a call into the preview script in LexMD's content world.
     private func call(_ body: String, _ arguments: [String: Any], completion: ((Any?) -> Void)? = nil) {
         webView.callAsyncJavaScript(body, arguments: arguments, in: nil, in: Self.world) { result in

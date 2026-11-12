@@ -105,6 +105,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case formatTable
     case focusMode, typewriterScrolling
     case commit
+    case exportPDF, exportHTML, printDocument, copyRichText
 
     var id: String { rawValue }
 
@@ -123,6 +124,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .formatTable: .format
         case .focusMode, .typewriterScrolling: .view
         case .commit: .sourceControl
+        case .exportPDF, .exportHTML, .printDocument, .copyRichText: .file
         }
     }
 
@@ -157,6 +159,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .focusMode: "Focus Mode"
         case .typewriterScrolling: "Typewriter Scrolling"
         case .commit: "Commit…"
+        case .exportPDF: "Export as PDF…"
+        case .exportHTML: "Export as HTML…"
+        case .printDocument: "Print…"
+        case .copyRichText: "Copy as Rich Text"
         }
     }
 
@@ -191,6 +197,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .focusMode: "option+cmd+f"
         case .typewriterScrolling: ""
         case .commit: "option+cmd+k"
+        case .exportPDF: "shift+cmd+e"
+        case .exportHTML: ""
+        case .printDocument: "option+cmd+p"
+        case .copyRichText: "option+cmd+c"
         }
         return Shortcut(string: value)
     }
