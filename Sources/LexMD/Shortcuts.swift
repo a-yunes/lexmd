@@ -111,7 +111,7 @@ struct Shortcut: Hashable {
 enum ShortcutAction: String, CaseIterable, Identifiable {
     case open, quickOpen, newDocument, save, revealInFinder
     case toggleSidebar, previewOnly, split, editorOnly, expandAll, collapseAll, zoomIn, zoomOut, zoomReset
-    case find, findNext, findPrevious, findInFiles
+    case find, findAndReplace, findNext, findPrevious, useSelectionForFind, jumpToSelection, findInFiles
     case goBack, goForward
     case bold, italic, strikethrough, inlineCode, link
     case newFolder, renameItem, duplicateItem, moveToTrash
@@ -138,6 +138,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .open, .quickOpen, .newDocument, .save, .revealInFinder: .file
         case .goBack, .goForward: .navigate
         case .find, .findNext, .findPrevious, .findInFiles: .find
+        case .findAndReplace, .useSelectionForFind, .jumpToSelection: .find
         case .toggleSidebar, .editorOnly, .split, .previewOnly, .expandAll, .collapseAll, .zoomIn, .zoomOut, .zoomReset: .view
         case .toggleOutline: .view
         case .bold, .italic, .strikethrough, .inlineCode, .link: .format
@@ -172,6 +173,9 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .findNext: "Find Next"
         case .findPrevious: "Find Previous"
         case .findInFiles: "Find in Files…"
+        case .findAndReplace: "Find and Replace…"
+        case .useSelectionForFind: "Use Selection for Find"
+        case .jumpToSelection: "Jump to Selection"
         case .goBack: "Back"
         case .goForward: "Forward"
         case .bold: "Bold"
@@ -227,6 +231,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .findNext: "cmd+g"
         case .findPrevious: "shift+cmd+g"
         case .findInFiles: "shift+cmd+f"
+        // The standard ⌥⌘F and ⌘E belong to Focus Mode and Inline Code.
+        case .findAndReplace: ""
+        case .useSelectionForFind: ""
+        case .jumpToSelection: "cmd+j"
         case .goBack: "cmd+["
         case .goForward: "cmd+]"
         case .bold: "shift+cmd+b"

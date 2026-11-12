@@ -22,13 +22,22 @@ enum QuickItem {
 extension AppModel {
     // MARK: - Find in document
 
-    func showFind() {
+    /// Find… shows the search field alone and Find and Replace… adds the replace field, as
+    /// in other Mac apps. The replace field takes focus when there is already something to find.
+    func showFind(replacing: Bool = false) {
         guard currentFile != nil else { NSSound.beep(); return }
         if !isFindBarVisible, let selection = editor.selectedSingleLineText() {
-            findQuery = selection
+            findQuery = findQueryText(for: selection)
         }
         isFindBarVisible = true
-        findFocusToken += 1
+        let showsReplace = replacing && !isReplaceVisible
+        isReplaceVisible = replacing
+        // A replace field that is about to appear focuses itself; see FindBar.
+        if replacing, !findQuery.isEmpty {
+            if !showsReplace { replaceFocusToken += 1 }
+        } else {
+            findFocusToken += 1
+        }
         refreshFind(scroll: true)
     }
 
@@ -44,6 +53,7 @@ extension AppModel {
         guard isFindBarVisible else { return }
         isFindBarVisible = false
         findCount = 0
+        findStatus = nil
         editor.clearFindHighlights()
         preview.setHighlight(nil, scroll: false)
         if viewMode != .read { editor.focus() }
@@ -51,6 +61,7 @@ extension AppModel {
 
     /// Recomputes matches for the find bar and highlights them in the editor and preview.
     func refreshFind(scroll: Bool) {
+        if findStatus != nil { findStatus = nil }
         guard isFindBarVisible, currentFile != nil, !findQuery.isEmpty,
               let regex = try? QuickSearchEngine.regex(for: findQuery, options: findOptions) else {
             if findCount != 0 { findCount = 0 }
@@ -77,10 +88,8 @@ extension AppModel {
         )
     }
 
-    private var findOptions: SearchOptions {
-        var options = SearchOptions()
-        options.caseSensitive = findCaseSensitive
-        return options
+    var findOptions: SearchOptions {
+        SearchOptions(caseSensitive: findCaseSensitive, wholeWord: findWholeWord, regex: findUsesRegex)
     }
 
     func highlightCountChanged(_ count: Int) {

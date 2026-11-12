@@ -81,6 +81,14 @@ struct LexMDCommands: Commands {
             .disabled(disabled)
     }
 
+    /// A checkmarked Edit menu item for one of the editor's automatic substitutions.
+    private func substitutionToggle(_ title: String, _ setting: WritableKeyPath<TextSubstitutions, Bool>) -> some View {
+        Toggle(title, isOn: Binding(
+            get: { model.substitutions[keyPath: setting] },
+            set: { model.substitutions[keyPath: setting] = $0 }
+        ))
+    }
+
     var body: some Commands {
         CommandGroup(after: .appInfo) {
             Button("Check for Updates…") { model.updates.checkForUpdates() }
@@ -112,22 +120,51 @@ struct LexMDCommands: Commands {
             .disabled(model.recentFolders.isEmpty)
         }
         CommandGroup(after: .pasteboard) {
+            // The system's pasteboard group ends with Select All, so Copy as Rich Text follows it
+            // directly; replacing that group would lose its responder-chain validation.
             item(.copyRichText, disabled: !model.canExport) { model.copyRichText() }
             Divider()
+            Menu("Find") {
+                item(.find) { model.showFind() }
+                item(.findAndReplace, disabled: model.currentFile == nil) { model.showFind(replacing: true) }
+                item(.findNext) { model.findNext(true) }
+                item(.findPrevious) { model.findNext(false) }
+                item(.useSelectionForFind, disabled: !model.isEditorVisible || !model.canUseSelectionForFind) {
+                    model.useSelectionForFind()
+                }
+                item(.jumpToSelection, disabled: !model.isEditorVisible) { model.jumpToSelection() }
+                Divider()
+                item(.findInFiles, disabled: model.rootURL == nil) { model.toggleQuickSearch(mode: .everything) }
+            }
             Menu("Spelling and Grammar") {
                 Button("Show Spelling and Grammar") { NSApp.sendAction(#selector(NSText.showGuessPanel(_:)), to: nil, from: nil) }
                 Button("Check Document Now") { NSApp.sendAction(#selector(NSText.checkSpelling(_:)), to: nil, from: nil) }
                 Divider()
                 Toggle("Check Spelling While Typing", isOn: Binding(get: { model.checksSpelling }, set: { model.checksSpelling = $0 }))
                 Toggle("Check Grammar With Spelling", isOn: Binding(get: { model.checksGrammar }, set: { model.checksGrammar = $0 }))
+                substitutionToggle("Correct Spelling Automatically", \.correctsSpelling)
             }
-            Menu("Find") {
-                item(.find) { model.showFind() }
-                item(.findNext) { model.findNext(true) }
-                item(.findPrevious) { model.findNext(false) }
+            Menu("Substitutions") {
+                Button("Show Substitutions") { model.performTextCommand(#selector(NSTextView.orderFrontSubstitutionsPanel(_:))) }
                 Divider()
-                item(.findInFiles, disabled: model.rootURL == nil) { model.toggleQuickSearch(mode: .everything) }
+                substitutionToggle("Smart Copy/Paste", \.smartCopyPaste)
+                substitutionToggle("Smart Quotes", \.smartQuotes)
+                substitutionToggle("Smart Dashes", \.smartDashes)
+                substitutionToggle("Smart Links", \.smartLinks)
+                substitutionToggle("Text Replacement", \.textReplacement)
             }
+            .disabled(!model.isEditorVisible)
+            Menu("Transformations") {
+                Button("Make Upper Case") { model.performTextCommand(#selector(NSResponder.uppercaseWord(_:))) }
+                Button("Make Lower Case") { model.performTextCommand(#selector(NSResponder.lowercaseWord(_:))) }
+                Button("Capitalize") { model.performTextCommand(#selector(NSResponder.capitalizeWord(_:))) }
+            }
+            .disabled(!model.isEditorVisible)
+            Menu("Speech") {
+                Button("Start Speaking") { model.performTextCommand(#selector(NSTextView.startSpeaking(_:))) }
+                Button("Stop Speaking") { model.performTextCommand(#selector(NSTextView.stopSpeaking(_:))) }
+            }
+            .disabled(!model.isEditorVisible)
         }
         CommandGroup(replacing: .saveItem) {
             item(.newTab) { model.newTab() }

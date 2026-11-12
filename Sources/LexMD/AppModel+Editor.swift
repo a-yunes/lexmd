@@ -12,6 +12,10 @@ extension AppModel {
             if self.checksSpelling != spelling { self.checksSpelling = spelling }
             if self.checksGrammar != grammar { self.checksGrammar = grammar }
         }
+        editor.onSubstitutionsChange = { [weak self] value in
+            if self?.substitutions != value { self?.substitutions = value }
+        }
+        observeEditorSelectionForFind()
         applyEditorSettings()
     }
 
@@ -19,5 +23,6 @@ extension AppModel {
         editor.setSpellChecking(spelling: checksSpelling, grammar: checksGrammar)
         editor.isFocusModeEnabled = focusMode
         editor.isTypewriterScrollingEnabled = typewriterScrolling
+        editor.substitutions = substitutions
     }
 }
