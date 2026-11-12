@@ -33,6 +33,8 @@ final class EditorController: NSObject, NSTextViewDelegate {
     var onScroll: ((CGFloat) -> Void)?
     /// Returns true when it handled Escape.
     var onCancel: (() -> Bool)?
+    /// Runs first for every key command; returns true when it handled it (link completion).
+    var onCommand: ((Selector) -> Bool)?
     private var hasFindHighlights = false
     /// Multi-line constructs from the last full highlight, kept in step with edits.
     private var blocks: MarkdownBlocks?
@@ -256,6 +258,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
     }
 
     func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if onCommand?(selector) == true { return true }
         if selector == #selector(NSResponder.insertNewline(_:)) {
             return continueList()
         }

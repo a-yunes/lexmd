@@ -24,7 +24,10 @@ final class AppModel {
     // Tree
     private(set) var rootURL: URL?
     private(set) var tree: [FileNode] = [] {
-        didSet { updateDisplayTree() }
+        didSet {
+            updateDisplayTree()
+            linksTreeDidChange()
+        }
     }
     /// The tree as displayed: compacted when the setting is on, before filtering.
     private(set) var displayTree: [FileNode] = []
@@ -110,6 +113,24 @@ final class AppModel {
     var quickPreview: QuickPreviewData?
     var quickFocusToken = 0
 
+    /// Shows the outline, backlinks, and link problems beside the document.
+    var isOutlineVisible = false {
+        didSet {
+            defaults.set(isOutlineVisible, forKey: Keys.outlineVisible)
+            outlineVisibilityChanged()
+        }
+    }
+    var suggestsLinks = true {
+        didSet { defaults.set(suggestsLinks, forKey: Keys.suggestsLinks) }
+    }
+    var marksBrokenLinks = true {
+        didSet {
+            defaults.set(marksBrokenLinks, forKey: Keys.marksBrokenLinks)
+            linkSettingsChanged()
+        }
+    }
+    let outline = OutlineModel()
+
     let editor = EditorController()
     let preview = PreviewController(allowsRemoteContent: UserDefaults.standard.bool(forKey: Keys.loadsRemoteContent))
     let updates = UpdateService()
@@ -143,6 +164,9 @@ final class AppModel {
         static let onboardingComplete = "onboardingComplete"
         static let recentFiles = "recentFiles"
         static let loadsRemoteContent = "loadsRemoteContent"
+        static let outlineVisible = "outlineVisible"
+        static let suggestsLinks = "suggestsLinks"
+        static let marksBrokenLinks = "marksBrokenLinks"
     }
 
     private init() {
@@ -156,6 +180,9 @@ final class AppModel {
         recentFiles = defaults.stringArray(forKey: Keys.recentFiles) ?? []
         sidebarPosition = SidebarPosition(rawValue: defaults.string(forKey: Keys.sidebarPosition) ?? "") ?? .left
         appearanceMode = AppearanceMode(rawValue: defaults.string(forKey: Keys.appearance) ?? "") ?? .system
+        isOutlineVisible = defaults.bool(forKey: Keys.outlineVisible)
+        suggestsLinks = defaults.object(forKey: Keys.suggestsLinks) as? Bool ?? true
+        marksBrokenLinks = defaults.object(forKey: Keys.marksBrokenLinks) as? Bool ?? true
 
         editor.onTextChange = { [weak self] newText in self?.textDidChange(newText) }
         editor.onCancel = { [weak self] in
@@ -170,6 +197,7 @@ final class AppModel {
         preview.onOpenURL = { [weak self] url in self?.openLink(url) }
         preview.onHighlightCount = { [weak self] count in self?.highlightCountChanged(count) }
         applyFontScale()
+        setUpLinks()
 
         Task { @MainActor [weak self] in self?.restoreSession() }
     }
@@ -354,6 +382,7 @@ final class AppModel {
 
     private func handleFileEvents(_ events: [DirectoryWatcher.Event]) {
         guard let root = rootURL?.path else { return }
+        linksHandleFileEvents(events, root: root)
         var structural = false
         var currentChanged = false
         let current = currentFile?.path
@@ -381,7 +410,7 @@ final class AppModel {
         guard FileManager.default.fileExists(atPath: path) else { NSSound.beep(); return }
         let file = URL(fileURLWithPath: path)
         if FileScanner.isMarkdown(path: path) {
-            open(file)
+            openDocument(file, fragment: url.fragment(percentEncoded: false))
         } else if FileScanner.opensWithoutRunningCode(file) {
             NSWorkspace.shared.open(file)
         } else {
@@ -506,17 +535,19 @@ final class AppModel {
         render(debounce: false)
     }
 
-    private func render(debounce: Bool) {
+    func render(debounce: Bool) {
         renderTask?.cancel()
         let source = text
         let base = currentFile?.deletingLastPathComponent()
+        let links = linkContext(for: source)
+        scheduleOutlineUpdate(debounce: debounce)
         renderTask = Task { [weak self] in
             if debounce {
                 try? await Task.sleep(nanoseconds: 90_000_000)
                 guard !Task.isCancelled else { return }
             }
             let (html, words) = await runDetached {
-                (MarkdownHTML.render(source), MarkdownHTML.wordCount(source))
+                (MarkdownHTML.render(source, links: links), MarkdownHTML.wordCount(source))
             }
             guard let self, !Task.isCancelled else { return }
             let reset = self.pendingScrollReset

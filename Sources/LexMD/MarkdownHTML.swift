@@ -2,7 +2,8 @@ import Foundation
 import Markdown
 
 enum MarkdownHTML {
-    static func render(_ source: String) -> String {
+    /// `links` resolves wiki links and marks broken local links; without it they render as text.
+    static func render(_ source: String, links: LinkContext? = nil) -> String {
         var body = source
         var prefix = ""
         if let (frontMatter, rest) = splitFrontMatter(source) {
@@ -11,6 +12,7 @@ enum MarkdownHTML {
         }
         let document = Document(parsing: body)
         var renderer = HTMLRenderer()
+        renderer.links = links
         renderer.visit(document)
         return prefix + renderer.result
     }
@@ -60,6 +62,8 @@ enum MarkdownHTML {
 
 private struct HTMLRenderer: MarkupWalker {
     var result = ""
+    var links: LinkContext?
+    private var linkDepth = 0
     private var slugCounts: [String: Int] = [:]
     private var inTableHead = false
     private var alignments: [Table.ColumnAlignment?] = []
@@ -195,6 +199,10 @@ private struct HTMLRenderer: MarkupWalker {
     // MARK: Inlines
 
     mutating func visitText(_ text: Text) {
+        if linkDepth == 0, links != nil {
+            result += links!.html(forText: text.string)
+            return
+        }
         result += esc(text.string)
     }
 
@@ -217,7 +225,11 @@ private struct HTMLRenderer: MarkupWalker {
     mutating func visitLink(_ link: Link) {
         let href = link.destination.map { " href=\"\(esc($0))\"" } ?? ""
         let title = link.title.map { " title=\"\(esc($0))\"" } ?? ""
-        result += "<a\(href)\(title)>\(capture(link))</a>"
+        var linkClass = ""
+        if let destination = link.destination { linkClass = links?.linkClass(forDestination: destination) ?? "" }
+        linkDepth += 1
+        result += "<a\(href)\(title)\(linkClass)>\(capture(link))</a>"
+        linkDepth -= 1
     }
 
     mutating func visitImage(_ image: Image) {

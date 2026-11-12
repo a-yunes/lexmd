@@ -6,6 +6,8 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     let webView: WKWebView
     var onOpenURL: ((URL) -> Void)?
     var onHighlightCount: ((Int) -> Void)?
+    /// The id of the heading in view as the preview scrolls (empty above the first heading).
+    var onHeadingChange: ((String) -> Void)?
 
     struct Highlight: Equatable {
         var query: String
@@ -26,6 +28,7 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     private var lastHTML = ""
     private var lastBase: URL?
     private var pendingReset = false
+    private var pendingHeading: String?
     private var scale: Double = 1
     private(set) var allowsRemoteContent: Bool
 
@@ -80,6 +83,10 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         let reset = pendingReset
         pendingReset = false
         call("lexmdRender(html, base, reset)", ["html": lastHTML, "base": base, "reset": reset])
+        if let id = pendingHeading {
+            pendingHeading = nil
+            call("lexmdReveal(id, false)", ["id": id])
+        }
         if highlight != nil || highlightApplied {
             applyHighlight(scroll: Date() < highlightScrollUntil)
             highlightScrollUntil = .distantPast
@@ -112,6 +119,12 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         call("lexmdScroll(f)", ["f": Double(fraction)])
     }
 
+    /// Scrolls a heading to the top, now or (`afterRender`) once the next document has rendered.
+    func revealHeading(_ id: String, smooth: Bool, afterRender: Bool = false) {
+        guard !afterRender, isLoaded else { pendingHeading = id; return }
+        call("lexmdReveal(id, smooth)", ["id": id, "smooth": smooth])
+    }
+
     func setScale(_ value: Double) {
         scale = value
         guard isLoaded else { return }
@@ -130,6 +143,8 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         if type == "copy", let text = body["text"] as? String {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
+        } else if type == "heading", let id = body["id"] as? String {
+            onHeadingChange?(id)
         }
     }
 
@@ -140,6 +155,14 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         call("lexmdZoom(s)", ["s": scale])
         pendingReset = true
         flush()
+    }
+
+    /// A file URL with the `#fragment` of the link that led to it, so links can open at a heading.
+    private static func keepingFragment(of link: URL, _ file: URL?) -> URL? {
+        guard let file, let fragment = link.fragment, !fragment.isEmpty,
+              var components = URLComponents(url: file, resolvingAgainstBaseURL: false) else { return file }
+        components.percentEncodedFragment = link.fragment(percentEncoded: true)
+        return components.url ?? file
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
@@ -155,7 +178,7 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         }
         if navigationAction.navigationType == .linkActivated {
             // A click on a link, including one that asks for a new window.
-            if frame?.isMainFrame != false { onOpenURL?(DocumentSchemeHandler.fileURL(for: url) ?? url) }
+            if frame?.isMainFrame != false { onOpenURL?(Self.keepingFragment(of: url, DocumentSchemeHandler.fileURL(for: url)) ?? url) }
         } else if frame?.isMainFrame == true, url.isFileURL, FileScanner.isMarkdown(path: url.path) {
             // A Markdown file dropped onto the preview. Nothing else may navigate without a click.
             onOpenURL?(url)

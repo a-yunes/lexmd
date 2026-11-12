@@ -49,6 +49,16 @@ private struct GeneralSettings: View {
                     Text("Images and videos hosted online load from their servers, which can see when you open a document. Local images always show.")
                 }
             }
+            Section("Links") {
+                Toggle(isOn: $model.suggestsLinks) {
+                    Text("Suggest links while typing")
+                    Text("After ](, # in a link, or [[, the editor lists matching documents, images, and headings.")
+                }
+                Toggle(isOn: $model.marksBrokenLinks) {
+                    Text("Mark broken links in the preview")
+                    Text("Links to files or headings that don’t exist are underlined in red. Web links are never checked.")
+                }
+            }
         }
         .formStyle(.grouped)
         .fixedSize(horizontal: false, vertical: true)

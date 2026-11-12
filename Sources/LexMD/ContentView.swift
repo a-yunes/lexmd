@@ -10,6 +10,7 @@ struct ContentView: View {
             if model.sidebarPosition == .right {
                 // macOS split views keep the sidebar leading, so a trailing tree uses the inspector column.
                 DetailView()
+                    .outlinePanel(.leading)
                     .toolbar { detailToolbar(trailingSidebar: true) }
                     .inspector(isPresented: $model.isInspectorPresented) {
                         SidebarView(inInspector: true)
@@ -21,6 +22,7 @@ struct ContentView: View {
                         .navigationSplitViewColumnWidth(min: 210, ideal: 270, max: 440)
                 } detail: {
                     DetailView()
+                        .outlinePanel(.trailing)
                         .toolbar { detailToolbar(trailingSidebar: false) }
                 }
             }
@@ -64,6 +66,9 @@ extension ContentView {
         ToolbarSpacer(.flexible)
         ToolbarItem(placement: .primaryAction) {
             ViewModePicker()
+        }
+        ToolbarItem(placement: .primaryAction) {
+            OutlineToolbarButton()
         }
         if trailingSidebar {
             ToolbarItem(placement: .primaryAction) {
