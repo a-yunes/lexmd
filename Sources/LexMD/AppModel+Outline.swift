@@ -310,9 +310,10 @@ extension AppModel {
     }
 
     /// Opens a Markdown document, then scrolls to the heading a link's `#fragment` names.
-    func openDocument(_ file: URL, fragment: String?) {
+    /// A document already open in another tab shows that tab.
+    func openDocument(_ file: URL, fragment: String?, inNewTab: Bool = false) {
         let wasOpen = currentFile?.path == file.path
-        open(file)
+        openPath(file.path, inNewTab: inNewTab)
         guard let fragment, !fragment.isEmpty, currentFile?.path == file.path else { return }
         revealAnchor(fragment, afterRender: !wasOpen)
     }
@@ -324,10 +325,10 @@ extension AppModel {
         if viewMode != .edit { preview.revealHeading(slug, smooth: !afterRender, afterRender: afterRender) }
     }
 
-    /// Opens a linking document at the link.
-    func openBacklink(_ link: Backlink) {
+    /// Opens a linking document at the link; Command-click opens it in a new tab.
+    func openBacklink(_ link: Backlink, inNewTab: Bool = NSEvent.modifierFlags.contains(.command)) {
         let wasOpen = currentFile?.path == link.path
-        open(URL(fileURLWithPath: link.path))
+        openPath(link.path, inNewTab: inNewTab)
         guard currentFile?.path == link.path else { return }
         if viewMode != .read { editor.reveal(link.range, indicator: true, select: true) }
         if viewMode != .edit, let heading = outline.headings(of: text).last(where: { $0.line <= link.line }) {

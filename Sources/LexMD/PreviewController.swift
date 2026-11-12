@@ -32,6 +32,10 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     private var pendingReset = false
     private var pendingHeading: String?
     private var scale: Double = 1
+    /// Scroll position (0...1) to apply after the next render, used when switching tabs.
+    var pendingScrollFraction: Double?
+    /// Modifier keys held for the last clicked link; Command opens it in a new tab.
+    private(set) var linkModifiers: NSEvent.ModifierFlags = []
     private(set) var allowsRemoteContent: Bool
     private let userContent: WKUserContentController
     private var injectedLibraries: Set<Int> = []
@@ -103,6 +107,10 @@ final class PreviewController: NSObject, WKNavigationDelegate {
             applyHighlight(scroll: Date() < highlightScrollUntil)
             highlightScrollUntil = .distantPast
         }
+        if let fraction = pendingScrollFraction {
+            pendingScrollFraction = nil
+            call("lexmdScroll(f)", ["f": fraction])
+        }
     }
 
     /// Pele and KaTeX take tens of milliseconds to evaluate, so they are injected into LexMD's
@@ -143,6 +151,13 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     func scroll(to fraction: CGFloat) {
         guard isLoaded else { return }
         call("lexmdScroll(f)", ["f": Double(fraction)])
+    }
+
+    /// Reports how far the page is scrolled, from 0 to 1.
+    func readScrollFraction(_ completion: @escaping (Double) -> Void) {
+        guard isLoaded else { return }
+        let body = "var max = document.documentElement.scrollHeight - window.innerHeight; return max > 0 ? window.scrollY / max : 0"
+        call(body, [:]) { completion(($0 as? NSNumber)?.doubleValue ?? 0) }
     }
 
     /// Scrolls a heading to the top, now or (`afterRender`) once the next document has rendered.
@@ -212,6 +227,8 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         }
         if navigationAction.navigationType == .linkActivated {
             // A click on a link, including one that asks for a new window.
+            linkModifiers = navigationAction.modifierFlags
+            defer { linkModifiers = [] }
             if frame?.isMainFrame != false { onOpenURL?(Self.keepingFragment(of: url, DocumentSchemeHandler.fileURL(for: url)) ?? url) }
         } else if frame?.isMainFrame == true, url.isFileURL, FileScanner.isMarkdown(path: url.path) {
             // A Markdown file dropped onto the preview. Nothing else may navigate without a click.

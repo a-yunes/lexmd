@@ -44,6 +44,12 @@ private struct GeneralSettings: View {
                 }
             }
             EditorSettingsSection()
+            Section("Tabs") {
+                Toggle(isOn: Binding(get: { model.tabStore.alwaysShowTabBar }, set: { model.tabStore.alwaysShowTabBar = $0 })) {
+                    Text("Always show tab bar")
+                    Text("Show the tab bar even when only one document is open.")
+                }
+            }
             Section("Preview") {
                 Toggle(isOn: $model.loadsRemoteContent) {
                     Text("Load images from the web")

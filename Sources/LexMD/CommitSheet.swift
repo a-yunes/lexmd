@@ -37,7 +37,7 @@ final class CommitSession: Identifiable {
     @ObservationIgnored private var loadTask: Task<Void, Never>?
     @ObservationIgnored private var diffTask: Task<Void, Never>?
     /// Saves open documents before committing.
-    @ObservationIgnored var saveDocuments: () -> Void = { AppModel.shared.saveNow() }
+    @ObservationIgnored var saveDocuments: () -> Void = { AppModel.shared.saveAllTabs() }
 
     init(git: Git, projectRoot: String, repositories: [GitRepository], repository: GitRepository) {
         self.git = git

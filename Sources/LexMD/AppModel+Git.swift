@@ -255,9 +255,9 @@ extension AppModel {
     var canCommitCurrentDocument: Bool { git.canCommit(currentFile: currentFile?.path) }
     var showsCommitButton: Bool { git.showsCommitButton(currentFile: currentFile?.path) }
 
-    /// Saves unsaved text, then opens the commit sheet for the current document's repository.
+    /// Saves unsaved text in every tab, then opens the commit sheet for the current document's repository.
     func showCommitSheet() {
-        saveNow()
+        saveAllTabs()
         git.presentCommitSheet(currentFile: currentFile?.path)
     }
 }
