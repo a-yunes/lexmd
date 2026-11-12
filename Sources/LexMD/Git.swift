@@ -13,6 +13,11 @@ struct GitResult: Sendable {
     var succeeded: Bool { status == 0 && !timedOut && !cancelled }
     var text: String { String(decoding: output, as: UTF8.self) }
     var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// The output without its final newline, for paths, which may end in spaces.
+    var line: String {
+        let text = text
+        return text.hasSuffix("\n") ? String(text.dropLast()) : text
+    }
 
     /// What to show the user when the command failed: git's stderr, else its stdout.
     var message: String {

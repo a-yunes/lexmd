@@ -26,6 +26,9 @@ BIN=$(swift build -c release --show-bin-path)
 APP=build/LexMD.app
 ICONS=build/icon
 rm -rf "$APP" "$ICONS"
+# A failed build leaves no half-assembled, unsigned app behind.
+BUILT=
+trap '[[ -n "$BUILT" ]] || rm -rf "$APP"' EXIT
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$ICONS"
 
 # Compile the Icon Composer document (Liquid Glass Assets.car plus an .icns fallback).
@@ -90,6 +93,7 @@ sign --deep "$APP/Contents/Frameworks/Sparkle.framework"
 sign --entitlements Resources/QuickLook/LexMDQuickLook.entitlements "$APPEX"
 sign "$APP"
 codesign --verify --deep --strict "$APP"
+BUILT=1
 echo "Built $APP"
 
 if [[ "${1:-}" == "--install" ]]; then

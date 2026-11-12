@@ -171,8 +171,13 @@ enum NoteCreator {
         }
         let (base, ext) = fileName(for: rawName)
         let data = Data(text.utf8)
-        for _ in 0..<100 {
-            let url = FileOperations.uniqueURL(in: folder, base: base, extension: ext)
+        // Each name is tried with an exclusive create, which also refuses a symbolic link (even
+        // one whose target is missing), so the note is always a new file in `folder`.
+        for counter in 1...10_000 {
+            let name = counter == 1 ? "\(base).\(ext)" : "\(base) \(counter).\(ext)"
+            let url = folder.appendingPathComponent(name)
+            var info = stat()
+            if lstat(url.path, &info) == 0 { continue }
             do {
                 try data.write(to: url, options: .withoutOverwriting)
                 return url

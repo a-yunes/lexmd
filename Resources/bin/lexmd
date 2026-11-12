@@ -3,6 +3,8 @@
 # Ships in LexMD.app/Contents/Resources/bin and is usually linked from /usr/local/bin.
 
 set -u
+# An exported CDPATH would make `cd` below pick other folders and print their names.
+unset CDPATH
 
 BUNDLE_ID=io.github.a-yunes.lexmd
 
@@ -104,6 +106,15 @@ for arg in "$@"; do
     esac
   fi
   path=$arg
+  if [ -z "$path" ]; then
+    warn "no such file or folder: (empty argument)"
+    status=1
+    continue
+  fi
+  # Keep names that start with a dash from being read as options by cd, dirname, and basename.
+  case $path in
+    -*) path=./$path ;;
+  esac
   if [ ! -e "$path" ]; then
     if [ "$create" -eq 0 ]; then
       warn "no such file or folder: $arg"

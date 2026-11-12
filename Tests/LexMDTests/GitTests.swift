@@ -119,6 +119,32 @@ struct GitParsingTests {
         #expect(GitStatusParser.parse(Data()).changes.isEmpty)
     }
 
+    @Test func commitsBothSidesOfRenamesButNotCopySources() {
+        let hash = String(repeating: "a", count: 40)
+        let snapshot = GitStatusParser.parse(porcelain([
+            "2 C. N... 100644 100644 100644 \(hash) \(hash) C100 copy.md",
+            "source.md",
+            "2 RD N... 100644 100644 000000 \(hash) \(hash) R100 moved.md",
+            "before.md",
+        ]))
+        let byPath = Dictionary(uniqueKeysWithValues: snapshot.changes.map { ($0.path, $0) })
+        #expect(byPath["copy.md"]?.commitPaths == ["copy.md"], "a copy leaves its source alone")
+        #expect(byPath["moved.md"]?.kind == .deleted)
+        #expect(byPath["moved.md"]?.commitPaths == ["moved.md", "before.md"])
+    }
+
+    @Test func documentChangesAreComputedOncePerSnapshot() {
+        var snapshot = GitStatusSnapshot(changes: [
+            GitFileChange(path: "a.md", index: ".", worktree: "M", kind: .modified),
+            GitFileChange(path: "Shot.PNG", index: "?", worktree: "?", kind: .untracked),
+            GitFileChange(path: "main.swift", index: ".", worktree: "M", kind: .modified),
+        ])
+        #expect(snapshot.documentChanges.map(\.path) == ["a.md", "Shot.PNG"])
+        snapshot.changes.append(GitFileChange(path: "b.jpeg", index: "?", worktree: "?", kind: .untracked))
+        #expect(snapshot.documentChanges.map(\.path) == ["a.md", "Shot.PNG", "b.jpeg"])
+        #expect(snapshot.documentChanges == snapshot.changes.filter(\.isDocumentChange))
+    }
+
     @Test func ignoresMalformedRecords() {
         let snapshot = GitStatusParser.parse(porcelain(["1 M", "2 R. N...", "u", "? ", "zzz"]))
         #expect(snapshot.changes.isEmpty)
@@ -417,6 +443,111 @@ struct GitRepositoryTests {
         #expect(env["GIT_TERMINAL_PROMPT"] == "0")
         #expect(env["GIT_OPTIONAL_LOCKS"] == "0")
         #expect(env["GIT_NO_LAZY_FETCH"] == "1")
+    }
+}
+
+// MARK: - Edge cases in real repositories
+
+@Suite(.enabled(if: isolatedGit != nil, "git is not installed"))
+struct GitEdgeCaseTests {
+    @Test func statusSkipsAheadBehindCounts() throws {
+        let repo = try TestRepo()
+        try repo.write("a.md", "a\n")
+        _ = try repo.status()
+        let statuses = GitLog.recorded.filter { Git.subcommand(of: $0) == "status" }
+        #expect(!statuses.isEmpty)
+        #expect(statuses.allSatisfy { $0.contains("--no-ahead-behind") })
+    }
+
+    @Test func committingACopyLeavesItsSourceUncommitted() throws {
+        let repo = try TestRepo()
+        try repo.run("config", "diff.renames", "copies")
+        try repo.write("source.md", "one\ntwo\nthree\nfour\nfive\n")
+        try repo.run("add", "source.md")
+        try repo.run("commit", "-q", "-m", "initial")
+        try FileManager.default.copyItem(atPath: repo.root + "/source.md", toPath: repo.root + "/copy.md")
+        try repo.write("source.md", "one\ntwo\nthree\nfour\nfive\nsix\n")
+        try repo.run("add", "-A")
+        try repo.write("source.md", "unrelated edit\n")
+
+        let copy = try repo.change("copy.md")
+        #expect(copy.originalPath == "source.md", "git reports the new file as a copy")
+        let result = GitOperations.commit(git: repo.git, repository: repo.root, changes: [copy], message: "Copy\n")
+        #expect((try? result.get()) != nil)
+        #expect(repo.lines("show", "--name-only", "--format=", "HEAD") == ["copy.md"])
+        #expect(repo.lines("show", "HEAD:source.md").count == 5, "the source was not committed")
+    }
+
+    @Test func findsRepositoriesWhosePathEndsInASpace() throws {
+        let repo = try TestRepo(path: "space at end ")
+        #expect(GitDiscovery.toplevel(git: repo.git, directory: repo.root) == repo.root)
+        #expect(GitOperations.operationInProgress(git: repo.git, repository: repo.root) == nil)
+        try repo.write("a.md", "a\n")
+        try repo.run("add", "a.md")
+        try repo.run("commit", "-q", "-m", "initial")
+        try repo.write("a.md", "b\n")
+        #expect(GitOperations.commit(git: repo.git, repository: repo.root, changes: [try repo.change("a.md")], message: "x\n")
+            .map { !$0.isEmpty } == .success(true))
+    }
+
+    @Test func commitStoppedByASlowPostCommitHookKeepsNewFilesTracked() throws {
+        let repo = try TestRepo()
+        try repo.write("a.md", "a\n")
+        try repo.run("add", "a.md")
+        try repo.run("commit", "-q", "-m", "initial")
+        // Closes git's pipes, then outlives the timeout below.
+        let hook = try repo.write(".git/hooks/post-commit", "#!/bin/sh\nexec >/dev/null 2>&1\nsleep 8\n")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook)
+        try repo.write("new.md", "new\n")
+
+        let result = GitOperations.commit(
+            git: repo.git, repository: repo.root, changes: [try repo.change("new.md")], message: "Add\n", timeout: 2)
+        #expect((try? result.get()) != nil, "the commit was made before git was stopped")
+        #expect(repo.lines("show", "--name-only", "--format=", "HEAD") == ["new.md"])
+        #expect(repo.lines("diff", "--cached", "--name-only").isEmpty, "no deletion of new.md is staged")
+        #expect(try repo.status().changes.isEmpty)
+    }
+
+    @Test func failedAddLeavesNoFilesStaged() throws {
+        let repo = try TestRepo()
+        try repo.write("a.md", "a\n")
+        try repo.run("add", "a.md")
+        try repo.run("commit", "-q", "-m", "initial")
+        // With add.ignoreErrors, git add stages what it can and still fails.
+        try repo.run("config", "add.ignoreErrors", "true")
+        try repo.write("readable.md", "ok\n")
+        let locked = try repo.write("unreadable.md", "secret\n")
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: locked)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: locked) }
+
+        let changes = [try repo.change("readable.md"), try repo.change("unreadable.md")]
+        let result = GitOperations.commit(git: repo.git, repository: repo.root, changes: changes, message: "x\n")
+        guard case .failure = result else {
+            Issue.record("the unreadable file should stop the commit")
+            return
+        }
+        #expect(repo.lines("diff", "--cached", "--name-only").isEmpty)
+        #expect(try repo.change("readable.md").kind == .untracked)
+    }
+}
+
+@MainActor
+@Suite(.enabled(if: isolatedGit != nil, "git is not installed"))
+struct CommitSessionTests {
+    @Test func refreshPicksUpNewFilesWithoutBlockingTheSheet() async throws {
+        let repo = try TestRepo()
+        try repo.write("a.md", "a\n")
+        let repository = GitRepository(root: repo.root)
+        let session = CommitSession(git: repo.git, projectRoot: repo.root, repositories: [repository], repository: repository)
+        try await waitUntil(seconds: 60) { !session.isLoading }
+        #expect(session.changes.map(\.path) == ["a.md"])
+        session.setChecked(try #require(session.changes.first), false)
+
+        try repo.write("b.md", "b\n")
+        session.refresh()
+        #expect(!session.isLoading, "a background refresh keeps the sheet usable")
+        try await waitUntil(seconds: 60) { session.changes.count == 2 }
+        #expect(session.checked == ["b.md"], "the user's choice for a.md is kept")
     }
 }
 

@@ -4,8 +4,9 @@ import Foundation
 ///
 /// The first folder becomes the project. Without a folder, files stay in the current project
 /// when they are all inside it; otherwise the project becomes the folder that holds them all
-/// (or the first file's folder when that would be the disk or the home folder). Files then open
-/// in tabs; files outside the project and paths that do not exist are left out.
+/// (or the first file's folder when that would be a whole disk, the home folder, or a folder
+/// above it, such as /Users). Files then open in tabs; files outside the project and paths that
+/// do not exist are left out.
 struct OpenPlan: Equatable {
     /// The folder to open as the project, or nil to keep the current one.
     var folder: String?
@@ -26,11 +27,19 @@ struct OpenPlan: Equatable {
         }
         if folder == nil, !files.isEmpty, !(currentRoot.map { root in files.allSatisfy { contains(root, $0) } } ?? false) {
             let common = commonFolder(files.map { ($0 as NSString).deletingLastPathComponent })
-            folder = common == "/" || common == home ? (files[0] as NSString).deletingLastPathComponent : common
+            folder = isTooBroad(common, home: home) ? (files[0] as NSString).deletingLastPathComponent : common
         }
         let root = folder ?? currentRoot
         if let root { files = files.filter { contains(root, $0) } }
         return OpenPlan(folder: folder, files: files)
+    }
+
+    /// Folders too large to scan as a project: a disk (/ or /Volumes/Name), a top-level folder
+    /// such as /Users or /Volumes, and the home folder or any folder above it.
+    static func isTooBroad(_ folder: String, home: String) -> Bool {
+        let parts = folder.split(separator: "/")
+        if parts.count < 2 || (parts.count == 2 && parts[0] == "Volumes") { return true }
+        return folder == home || contains(folder, home)
     }
 
     static func contains(_ folder: String, _ path: String) -> Bool {
