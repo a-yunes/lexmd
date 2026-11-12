@@ -13,13 +13,13 @@ struct Shortcut: Hashable {
     private static let specialKeys: [UInt16: String] = [
         123: "leftArrow", 124: "rightArrow", 125: "downArrow", 126: "upArrow",
         36: "return", 76: "return", 48: "tab", 49: "space", 51: "delete", 117: "deleteForward",
-        115: "home", 119: "end", 116: "pageUp", 121: "pageDown",
+        115: "home", 119: "end", 116: "pageUp", 121: "pageDown", 53: "escape",
     ]
 
     private static let symbols: [String: String] = [
         "leftArrow": "←", "rightArrow": "→", "downArrow": "↓", "upArrow": "↑",
         "return": "↩", "tab": "⇥", "space": "Space", "delete": "⌫", "deleteForward": "⌦",
-        "home": "↖", "end": "↘", "pageUp": "⇞", "pageDown": "⇟",
+        "home": "↖", "end": "↘", "pageUp": "⇞", "pageDown": "⇟", "escape": "⎋",
     ]
 
     init(key: String, modifiers: NSEvent.ModifierFlags) {
@@ -81,6 +81,7 @@ struct Shortcut: Hashable {
         case "delete": equivalent = .delete
         case "deleteForward": equivalent = .deleteForward
         case "home": equivalent = .home
+        case "escape": equivalent = .escape
         case "end": equivalent = .end
         case "pageUp": equivalent = .pageUp
         case "pageDown": equivalent = .pageDown
@@ -109,45 +110,42 @@ struct Shortcut: Hashable {
 
 /// Every command that can carry a keyboard shortcut, with its default.
 enum ShortcutAction: String, CaseIterable, Identifiable {
-    case open, quickOpen, newDocument, save, revealInFinder
-    case toggleSidebar, previewOnly, split, editorOnly, expandAll, collapseAll, zoomIn, zoomOut, zoomReset
-    case find, findNext, findPrevious, findInFiles
-    case goBack, goForward
-    case bold, italic, strikethrough, inlineCode, link
-    case newFolder, renameItem, duplicateItem, moveToTrash
-    case closeTab, reopenClosedTab, showNextTab, showPreviousTab
-    case newTab
-    case formatTable
-    case focusMode, typewriterScrolling
-    case commit
-    case exportPDF, exportHTML, printDocument, copyRichText
-    case toggleOutline
+    // Declared in menu order, which is the order Settings lists them in. The raw values are the
+    // keys of saved shortcuts, so a case is never renamed.
     case installCommandLineTool
+    case newDocument, newFolder, open, quickOpen, newTab, closeTab, reopenClosedTab, save
+    case revealInFinder, renameItem, duplicateItem, moveToTrash, exportPDF, exportHTML, printDocument
+    case copyRichText, find, findNext, findPrevious, findInFiles
+    case bold, italic, strikethrough, inlineCode, link, formatTable
+    case toggleSidebar, toggleOutline, previewOnly, split, editorOnly, focusMode, typewriterScrolling
+    case expandAll, collapseAll, zoomIn, zoomOut, zoomReset
+    case goBack, goForward
+    case commit
+    case showPreviousTab, showNextTab
     case renameInSidebar, trashInSidebar
 
     var id: String { rawValue }
 
+    /// The menu a command appears in, in menu bar order. The raw value is the menu's name.
     enum Category: String, CaseIterable {
-        case file = "File", navigate = "Navigate", find = "Find", view = "View", format = "Format"
-        case sourceControl = "Source Control"
+        case app = "LexMD", file = "File", edit = "Edit", format = "Format", view = "View", go = "Go"
+        case sourceControl = "Source Control", window = "Window"
+        /// Commands for the file list, which work while it has focus.
         case sidebar = "Sidebar"
     }
 
     var category: Category {
         switch self {
-        case .open, .quickOpen, .newDocument, .save, .revealInFinder: .file
-        case .goBack, .goForward: .navigate
-        case .find, .findNext, .findPrevious, .findInFiles: .find
-        case .toggleSidebar, .editorOnly, .split, .previewOnly, .expandAll, .collapseAll, .zoomIn, .zoomOut, .zoomReset: .view
-        case .toggleOutline: .view
-        case .bold, .italic, .strikethrough, .inlineCode, .link: .format
-        case .newFolder, .renameItem, .duplicateItem, .moveToTrash, .closeTab, .reopenClosedTab, .newTab: .file
-        case .showNextTab, .showPreviousTab: .navigate
-        case .formatTable: .format
-        case .focusMode, .typewriterScrolling: .view
+        case .installCommandLineTool: .app
+        case .newDocument, .newFolder, .open, .quickOpen, .newTab, .closeTab, .reopenClosedTab, .save,
+             .revealInFinder, .renameItem, .duplicateItem, .moveToTrash, .exportPDF, .exportHTML, .printDocument: .file
+        case .copyRichText, .find, .findNext, .findPrevious, .findInFiles: .edit
+        case .bold, .italic, .strikethrough, .inlineCode, .link, .formatTable: .format
+        case .toggleSidebar, .toggleOutline, .previewOnly, .split, .editorOnly, .focusMode, .typewriterScrolling,
+             .expandAll, .collapseAll, .zoomIn, .zoomOut, .zoomReset: .view
+        case .goBack, .goForward: .go
         case .commit: .sourceControl
-        case .exportPDF, .exportHTML, .printDocument, .copyRichText: .file
-        case .installCommandLineTool: .file
+        case .showPreviousTab, .showNextTab: .window
         case .renameInSidebar, .trashInSidebar: .sidebar
         }
     }
