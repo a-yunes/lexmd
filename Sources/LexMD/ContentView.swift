@@ -554,6 +554,10 @@ final class WorkspaceContainer: NSView, NSSplitViewDelegate {
         self.editor = editor
         self.preview = preview
         super.init(frame: .zero)
+        // The web view is transparent and redraws a moment after each resize step. An opaque
+        // backdrop in the document's color, resized in the same layout pass, is what shows
+        // through until it does, instead of the window behind it.
+        wantsLayer = true
         split.isVertical = true
         split.dividerStyle = .thin
         split.delegate = self
@@ -574,6 +578,17 @@ final class WorkspaceContainer: NSView, NSSplitViewDelegate {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
 
     func setMode(_ newMode: ViewMode) {
         guard newMode != mode else { return }

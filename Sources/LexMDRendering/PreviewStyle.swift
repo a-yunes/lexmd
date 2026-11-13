@@ -163,10 +163,13 @@ code, pre, kbd, samp { font-family: "SF Mono", ui-monospace, Menlo, monospace; }
   background: var(--fill-strong);
   color: var(--secondary);
   cursor: default;
+}
+/* The blur is a composited layer of its own, so it exists only while the button shows. */
+.codeblock:hover .copy, .codeblock:focus-within .copy, .codeblock .copy:focus-visible {
+  opacity: 1;
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
 }
-.codeblock:hover .copy, .codeblock:focus-within .copy, .codeblock .copy:focus-visible { opacity: 1; }
 .codeblock:hover .lang, .codeblock:focus-within .lang { opacity: 0; }
 .codeblock .copy:hover { color: var(--text); }
 .codeblock .copy.done { color: var(--tip); }
