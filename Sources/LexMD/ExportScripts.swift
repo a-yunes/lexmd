@@ -65,9 +65,7 @@ var content = document.getElementById('content');
 var base = document.baseURI;
 var inert = document.implementation.createHTMLDocument('');
 var XHTML = 'http://www.w3.org/1999/xhtml';
-var DROP = { script: 1, iframe: 1, frame: 1, frameset: 1, object: 1, embed: 1, applet: 1, base: 1, meta: 1, link: 1,
-  noscript: 1, template: 1, xmp: 1, noembed: 1, noframes: 1, plaintext: 1, portal: 1,
-  set: 1, animate: 1, animatemotion: 1, animatetransform: 1 };
+var DROP = /^(\#(UnsafeMarkup.elements))$/i;
 
 // Finishes any diagrams and math still queued in the preview.
 async function lexmdFinish() {
@@ -110,7 +108,7 @@ function lexmdUnsafeURL(name, value) {
 function lexmdScrub(root) {
   Array.prototype.slice.call(root.querySelectorAll('*')).forEach(function (el) {
     var name = el.localName.toLowerCase();
-    if (DROP[name] || (name === 'button' && el.classList.contains('copy')) || el.id === 'lexmd-scroll') { el.remove(); return; }
+    if (DROP.test(name) || (name === 'button' && el.classList.contains('copy'))) { el.remove(); return; }
     if (name === 'mark' && el.classList.contains('lexmd-hit')) { el.replaceWith(inert.createTextNode(el.textContent)); return; }
     Array.prototype.slice.call(el.attributes).forEach(function (a) {
       var n = a.name.toLowerCase();

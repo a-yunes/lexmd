@@ -85,6 +85,7 @@ struct ExportTests {
     <xmp><script>alert(10)</script></xmp>
     <template><script>alert(11)</script></template>
     <noscript><script>alert(12)</script></noscript>
+    <svg width="10" height="10"><foreignObject width="10" height="10"><div>embedded page</div></foreignObject><discard begin="0s"/><handler type="text/ecmascript">alert(13)</handler></svg>
 
     ![local](icon.png)
 
@@ -109,6 +110,10 @@ struct ExportTests {
         #expect(html.range(of: #"\son[a-z]+\s*="#, options: [.regularExpression, .caseInsensitive]) == nil)
         #expect(!html.lowercased().contains("javascript:"))
         #expect(!html.contains("<iframe") && !html.contains("srcdoc") && !html.contains("<template"))
+        // The same elements diagrams may not contain: SVG that embeds a page, runs handlers, or
+        // removes content on a timer.
+        #expect(!html.lowercased().contains("<foreignobject") && !html.contains("<discard") && !html.contains("<handler"))
+        #expect(!html.contains("embedded page"))
         #expect(html.contains(#"<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none';"#))
         #expect(html.contains("<title>A &lt;b&gt; &amp; &quot;c&quot;</title>"))
         // The same shell as Quick Look: the reader's language for VoiceOver, and native scroll
