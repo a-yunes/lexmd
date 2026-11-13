@@ -284,20 +284,27 @@ extension AppModel {
 
     /// Re-reads changed documents and images; folder changes rescan the whole project.
     func linksHandleFileEvents(_ events: [DirectoryWatcher.Event], root: String) {
+        let changes = Self.linkIndexChanges(events, root: root)
+        if changes.rebuild { outline.index.refresh() } else if !changes.paths.isEmpty { outline.index.update(paths: changes.paths) }
+    }
+
+    /// How file events change the link index. It skips what the tree skips. It is rebuilt when
+    /// the stream lost track of changes or a folder was removed, renamed or moved in; a new
+    /// folder starts empty, and the files later created in it report their own events.
+    /// Otherwise only the documents and images that changed are read again.
+    nonisolated static func linkIndexChanges(_ events: [DirectoryWatcher.Event], root: String) -> (rebuild: Bool, paths: [String]) {
         var paths: [String] = []
-        var rescan = false
-        for event in events where !FileScanner.isIgnored(event.path, root: root) {
+        for event in events {
+            guard let path = FileScanner.eventPath(event.path, root: root) else { continue }
             let flags = Int(event.flags)
-            if flags & (kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagRootChanged) != 0 {
-                rescan = true
-            } else if flags & kFSEventStreamEventFlagItemIsDir != 0 {
-                let moved = kFSEventStreamEventFlagItemCreated | kFSEventStreamEventFlagItemRemoved | kFSEventStreamEventFlagItemRenamed
-                if flags & moved != 0 { rescan = true }
-            } else if FileScanner.isMarkdown(path: event.path) || LinkIndexBuilder.isImage(path: event.path) {
-                paths.append(event.path)
+            if flags & FileScanner.rescanFlags != 0 { return (true, []) }
+            if flags & kFSEventStreamEventFlagItemIsDir != 0 {
+                if flags & (kFSEventStreamEventFlagItemRemoved | kFSEventStreamEventFlagItemRenamed) != 0 { return (true, []) }
+            } else if FileScanner.isMarkdown(path: path) || LinkIndexBuilder.isImage(path: path) {
+                paths.append(path)
             }
         }
-        if rescan { outline.index.refresh() } else if !paths.isEmpty { outline.index.update(paths: paths) }
+        return (false, paths)
     }
 
     private func linkIndexDidUpdate(from previous: LinkIndexSnapshot) {

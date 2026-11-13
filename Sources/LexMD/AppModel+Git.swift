@@ -172,11 +172,10 @@ final class GitModel {
 
     func fileEvents(_ events: [DirectoryWatcher.Event]) {
         guard !events.isEmpty else { return }
-        // A repository was created or removed inside the project.
-        let structural = kFSEventStreamEventFlagItemCreated | kFSEventStreamEventFlagItemRemoved
-            | kFSEventStreamEventFlagItemRenamed
+        // A repository was created or removed inside the project. Git's own folder is one the
+        // tree ignores, so these events are read as they come rather than through the tree's filter.
         let changesRepository = events.contains { event in
-            Int(event.flags) & structural != 0
+            Int(event.flags) & FileScanner.structuralFlags != 0
                 && ((event.path as NSString).lastPathComponent == ".git" || event.path.hasSuffix("/.git/HEAD"))
         }
         // A repository's configuration changed; discovery rereads the settings status uses.

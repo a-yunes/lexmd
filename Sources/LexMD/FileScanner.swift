@@ -200,6 +200,21 @@ enum FileScanner {
     static let structuralFlags = kFSEventStreamEventFlagItemCreated | kFSEventStreamEventFlagItemRemoved
         | kFSEventStreamEventFlagItemRenamed
     private static let libraryPath = FileManager.default.homeDirectoryForCurrentUser.path + "/Library"
+
+    /// Whether `path` is in ~/Library, whose caches change constantly. Like the scan, the
+    /// project skips it unless the project itself is inside it, as an iCloud Drive folder is.
+    static func isInSkippedLibrary(_ path: String, root: String) -> Bool {
+        let inside = { (p: String) in p == libraryPath || p.hasPrefix(libraryPath + "/") }
+        return inside(path) && !inside(root)
+    }
+
+    /// A file system event's path as the tree spells it (FSEvents adds a slash to some folders),
+    /// or nil for an event the project skips. Every consumer of the project's events uses this.
+    static func eventPath(_ raw: String, root: String) -> String? {
+        let path = raw.count > 1 && raw.hasSuffix("/") ? String(raw.dropLast()) : raw
+        guard !isIgnored(path, root: root), !isInSkippedLibrary(path, root: root) else { return nil }
+        return path
+    }
     /// Flags that mean the stream lost track of individual changes.
     static let rescanFlags = kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagRootChanged
 
@@ -214,9 +229,7 @@ enum FileScanner {
         paths: () -> (files: Set<String>, folders: Set<String>),
         exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
     ) -> Bool {
-        let path = path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
-        // Like the scan, skip ignored folders and ~/Library, whose caches change constantly.
-        guard !isIgnored(path, root: root), path != libraryPath, !path.hasPrefix(libraryPath + "/") else { return false }
+        guard let path = eventPath(path, root: root) else { return false }
         let flags = Int(flags)
         if flags & rescanFlags != 0 { return true }
         guard flags & structuralFlags != 0 else { return false }
