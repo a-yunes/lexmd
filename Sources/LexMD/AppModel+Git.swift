@@ -264,14 +264,6 @@ extension AppModel {
         git.projectScanned(root: rootURL?.path, tree: tree, statusEnabled: showGitStatus)
     }
 
-    func gitDocumentSaved() { git.documentSaved() }
-
-    func gitFileEvents(_ events: [DirectoryWatcher.Event]) { git.fileEvents(events) }
-
-    func gitSettingChanged() { git.setStatusEnabled(showGitStatus) }
-
-    /// Whether any git UI (menu, setting, badges) is shown for the open project.
-    var showsGitCommands: Bool { git.isActive }
     var canCommitCurrentDocument: Bool { git.canCommit(currentFile: currentFile?.path) }
     var showsCommitButton: Bool { git.showsCommitButton(currentFile: currentFile?.path) }
 

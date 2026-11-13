@@ -277,10 +277,6 @@ final class LinkIndex {
         start(after: delay)
     }
 
-    func resolve(_ target: String, from documentPath: String?) -> String? {
-        snapshot.resolve(target, from: documentPath)
-    }
-
     /// Waits until pending work is done (used by tests).
     func waitUntilIdle() async {
         while task != nil { try? await Task.sleep(for: .milliseconds(20)) }

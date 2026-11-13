@@ -186,11 +186,6 @@ final class EditorController: NSObject, NSTextViewDelegate {
         scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
-    func moveCursorToEnd() {
-        let length = (textView.string as NSString).length
-        textView.setSelectedRange(NSRange(location: length, length: 0))
-        textView.scrollRangeToVisible(NSRange(location: length, length: 0))
-    }
 
     func focus() {
         textView.window?.makeFirstResponder(textView)

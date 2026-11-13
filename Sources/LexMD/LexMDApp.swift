@@ -264,7 +264,7 @@ struct LexMDCommands: Commands {
             Divider()
             item(.formatTable, disabled: disabled) { model.editor.formatTable() }
         }
-        if model.showsGitCommands {
+        if model.git.isActive {
             CommandMenu("Source Control") {
                 item(.commit, disabled: !model.canCommitCurrentDocument) { model.showCommitSheet() }
             }

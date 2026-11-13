@@ -157,7 +157,7 @@ final class AppModel {
     var showGitStatus = true {
         didSet {
             defaults.set(showGitStatus, forKey: Keys.showGitStatus)
-            gitSettingChanged()
+            git.setStatusEnabled(showGitStatus)
         }
     }
 
@@ -543,7 +543,6 @@ final class AppModel {
         if !missing.isEmpty { expanded.formUnion(missing) }
     }
 
-    func rescanSoon() { scheduleRescan() }
 
     func rescan() {
         guard let root = rootURL else { return }
@@ -572,7 +571,8 @@ final class AppModel {
         }
     }
 
-    private func scheduleRescan() {
+    /// Rescans once a burst of changes has passed.
+    func rescanSoon() {
         rescanTask?.cancel()
         rescanTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 250_000_000)
@@ -589,7 +589,7 @@ final class AppModel {
         }
         if eventsTouchOpenDocuments(events) { followMovedDocuments() }
         linksHandleFileEvents(events, root: root)
-        gitFileEvents(events)
+        git.fileEvents(events)
         var structural = false
         var currentChanged = false
         let current = currentFile?.path
@@ -605,7 +605,7 @@ final class AppModel {
                 structural = true
             }
         }
-        if structural { scheduleRescan() }
+        if structural { rescanSoon() }
         if currentChanged { reloadFromDiskIfNeeded() }
     }
 
@@ -902,7 +902,7 @@ final class AppModel {
             savedText = text
             if saveError != nil { saveError = nil }
             if isCurrentDocumentMissing { updateMissingDocuments() }
-            gitDocumentSaved()
+            git.documentSaved()
         } catch {
             saveError = "Couldn’t save: \(error.localizedDescription)"
         }

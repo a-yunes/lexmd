@@ -20,11 +20,6 @@ struct WikiLink: Hashable, Sendable {
 
     private static let pattern = try! NSRegularExpression(pattern: #"\[\[([^\[\]\n\r]+?)\]\]"#)
 
-    /// Finds wiki links in a document, skipping code spans, code blocks, raw HTML, and front matter.
-    static func parse(in source: String) -> [WikiLink] {
-        DocumentStructure.analyze(source).links.compactMap(\.wiki)
-    }
-
     /// Finds wiki links in plain text with no Markdown structure (for example, one text run).
     static func scan(_ text: String) -> [WikiLink] {
         let ns = text as NSString

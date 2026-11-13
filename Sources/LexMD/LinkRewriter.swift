@@ -43,7 +43,7 @@ struct MarkdownLinkSpan: Equatable {
 // MARK: - Scanner
 
 /// Finds the exact ranges of link destinations while skipping front matter, fenced and indented
-/// code, and code spans. Wiki links are skipped here; `WikiLink.parse(in:)` finds those.
+/// code, and code spans. Wiki links are skipped here; `DocumentStructure.analyze(_:)` finds those.
 enum MarkdownLinkScanner {
     private struct Line {
         var start: Int
@@ -462,7 +462,7 @@ enum LinkRewriter {
     ///
     /// Inline links count only where the Markdown parser sees a link too, so links in code, raw
     /// HTML, math, and footnote references are never touched. Wiki links come from
-    /// `WikiLink.parse(in:)`, which skips the same places and `[[^1]]` footnotes.
+    /// `DocumentStructure.analyze(_:)`, which skips the same places and `[[^1]]` footnotes.
     static func edits(in text: String, oldPath: String, newPath: String, context: Context) -> [TextEdit] {
         let spans = MarkdownLinkScanner.links(in: text)
         guard !spans.isEmpty || text.contains("[[") else { return [] }

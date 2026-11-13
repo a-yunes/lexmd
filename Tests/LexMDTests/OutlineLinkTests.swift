@@ -79,7 +79,7 @@ struct OutlineLinkTests {
 
         <div>[[html]]</div>
         """
-        let links = WikiLink.parse(in: source)
+        let links = DocumentStructure.analyze(source).links.compactMap(\.wiki)
         #expect(links.map(\.target) == ["Name", "Other", "Doc", "folder/Deep", "", "Name"])
         #expect(links.map(\.alias) == [nil, "the label", nil, nil, nil, "alias"])
         #expect(links.map(\.heading) == [nil, nil, "Some Heading", nil, "Local", nil])
@@ -189,7 +189,7 @@ struct OutlineLinkTests {
         #expect(structure.links.filter { $0.kind == .wiki }.map { ns.substring(with: $0.range) } == [
             "[[Doc|label $a^2$]]", "[[Doc#Euler $e^x$]]", "[[Doc]]", "[[Doc]]",
         ])
-        #expect(WikiLink.parse(in: "$[[x]]$ and [[y]] and [[^z]]").map(\.target) == ["y"])
+        #expect(DocumentStructure.analyze("$[[x]]$ and [[y]] and [[^z]]").links.compactMap(\.wiki).map(\.target) == ["y"])
         let problems = OutlineAnalysis.make(source: source, context: context).problems
         #expect(problems.map(\.message) == ["File not found: gone.md"])
         #expect(snapshot.incoming[root + "/Doc.md"]?.count == 4)
