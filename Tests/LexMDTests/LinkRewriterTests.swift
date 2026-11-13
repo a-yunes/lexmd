@@ -23,6 +23,9 @@ struct LinkRewriterTests {
         #expect(rewrite("[a](./notes.md) and [b](notes.md \"Title\")", at: "/p/index.md", [rename])
             == "[a](./guide.md) and [b](guide.md \"Title\")")
         #expect(rewrite("[other](other.md)", at: "/p/index.md", [rename]) == "[other](other.md)")
+        // A new name with a colon must not turn the link into a URL with that scheme.
+        let colon = PathMove(from: "/p/notes.md", to: "/p/2026:plan.md")
+        #expect(rewrite("[n](notes.md)", at: "/p/index.md", [colon]) == "[n](./2026:plan.md)")
     }
 
     @Test func relativePathsUpAndDownFolders() {
@@ -199,9 +202,15 @@ struct LinkRewriterTests {
     }
 
     @Test func pathHelpers() {
-        #expect(LinkRewriter.normalize("/p/a/../b/./c.md") == "/p/b/c.md")
-        #expect(LinkRewriter.relativePath(from: "/p/a/b", to: "/p/c/d.md") == "../../c/d.md")
-        #expect(LinkRewriter.relativePath(from: "/p", to: "/p") == ".")
+        #expect("/p/a/../b/./c.md".standardizedPath == "/p/b/c.md")
+        #expect(LinkPaths.relative("/p/c/d.md", from: "/p/a/b") == "../../c/d.md")
+        #expect(LinkPaths.relative("/p", from: "/p") == ".")
+        #expect(LinkPaths.relative("/p/a.md", from: "/p") == "a.md")
+        // A colon in the first segment would make the destination a URL with that scheme.
+        #expect(LinkPaths.encode("a:b.md") == "./a:b.md")
+        #expect(LinkPaths.encode("docs/a:b.md") == "docs/a:b.md")
+        #expect(LinkPaths.encode("../a:b.md") == "../a:b.md")
+        #expect(ImageStore.relativePath(from: URL(fileURLWithPath: "/p/docs"), to: URL(fileURLWithPath: "/p/img/a.png")) == "../img/a.png")
         #expect(PathMove(from: "/p/a", to: "/p/b").map("/p/ab/c.md") == nil)
         #expect(PathMove(from: "/p/a", to: "/p/b").map("/p/a/c.md") == "/p/b/c.md")
     }

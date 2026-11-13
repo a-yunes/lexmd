@@ -89,12 +89,7 @@ enum ImageStore {
 
     /// The path of `file` relative to `directory`, using `..` where needed.
     static func relativePath(from directory: URL, to file: URL) -> String {
-        let from = FileScanner.canonicalPath(directory.path).split(separator: "/")
-        let to = FileScanner.canonicalPath(file.path).split(separator: "/")
-        var common = 0
-        while common < from.count, common < to.count - 1, from[common] == to[common] { common += 1 }
-        let ups = Array(repeating: "..", count: from.count - common)
-        return (ups + to[common...].map(String.init)).joined(separator: "/")
+        LinkPaths.relative(FileScanner.canonicalPath(file.path), from: FileScanner.canonicalPath(directory.path))
     }
 
     private static let pathAllowed = CharacterSet(

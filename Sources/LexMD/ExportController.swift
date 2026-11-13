@@ -323,9 +323,7 @@ enum Exporter {
         allowed.remove(charactersIn: "/;")
         let parts = Array(repeating: "..", count: base.count - common)
             + target[common...].map { $0.addingPercentEncoding(withAllowedCharacters: allowed) ?? $0 }
-        let path = parts.joined(separator: "/")
-        // A colon in the first segment would read as a URL scheme.
-        return parts.first?.contains(":") == true ? "./" + path : path
+        return LinkPaths.guardingScheme(parts.joined(separator: "/"))
     }
 
     // MARK: Rich text

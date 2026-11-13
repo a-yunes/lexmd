@@ -174,18 +174,27 @@ enum LinkPaths {
         return set
     }()
 
-    /// The path to `path` relative to the folder `from`.
+    /// The path to the file or folder `path` relative to the folder `from`, using `..` where
+    /// needed; "." when they are the same folder. Both must be absolute and spelled the same way
+    /// (canonicalize first when they may not be). Every relative link LexMD writes uses this.
     static func relative(_ path: String, from folder: String) -> String {
-        let a = folder.split(separator: "/"), b = path.split(separator: "/")
+        let base = folder.split(separator: "/"), goal = path.split(separator: "/")
         var common = 0
-        while common < a.count, common < b.count - 1, a[common] == b[common] { common += 1 }
-        let ups = Array(repeating: "..", count: a.count - common)
-        return (ups + b[common...].map(String.init)).joined(separator: "/")
+        while common < base.count, common < goal.count, base[common] == goal[common] { common += 1 }
+        let parts = Array(repeating: "..", count: base.count - common) + goal[common...].map(String.init)
+        return parts.isEmpty ? "." : parts.joined(separator: "/")
+    }
+
+    /// A relative destination that can't be read as a URL: a colon in its first segment would
+    /// make `a:b.md` a link with the scheme `a`, so such a path starts with `./`.
+    static func guardingScheme(_ destination: String) -> String {
+        let first = destination.prefix { $0 != "/" }
+        return first.contains(":") ? "./" + destination : destination
     }
 
     /// Percent-encodes a relative path for use as a link destination.
     static func encode(_ path: String) -> String {
-        path.addingPercentEncoding(withAllowedCharacters: destinationAllowed) ?? path
+        guardingScheme(path.addingPercentEncoding(withAllowedCharacters: destinationAllowed) ?? path)
     }
 
     static func encodeFragment(_ fragment: String) -> String {

@@ -515,10 +515,10 @@ enum LinkRewriter {
         let wasEncoded = decoded != unescaped
         guard !decoded.isEmpty else { return nil }
 
-        let oldTarget = normalize(oldDirectory + "/" + decoded)
+        let oldTarget = (oldDirectory + "/" + decoded).standardizedPath
         let newTarget = context.newLocation(of: oldTarget)
         guard newTarget != oldTarget || newDirectory != oldDirectory else { return nil }
-        var relative = relativePath(from: newDirectory, to: newTarget)
+        var relative = LinkPaths.relative(newTarget, from: newDirectory)
         if trimmedRelative(relative) == trimmedRelative(decoded) { return nil }
         if decoded.hasPrefix("./"), !relative.hasPrefix("../"), relative != "." { relative = "./" + relative }
         if decoded.hasSuffix("/"), !relative.hasSuffix("/") { relative += "/" }
@@ -531,7 +531,7 @@ enum LinkRewriter {
         } else {
             encoded = escapeRaw(relative)
         }
-        return encoded + suffix
+        return LinkPaths.guardingScheme(encoded) + suffix
     }
 
     private static let encodedPathAllowed: CharacterSet = {
@@ -596,27 +596,6 @@ enum LinkRewriter {
     }
 
     /// Resolves `.` and `..` without touching the file system.
-    static func normalize(_ path: String) -> String {
-        var components: [Substring] = []
-        for component in path.split(separator: "/", omittingEmptySubsequences: true) {
-            if component == "." { continue }
-            if component == ".." {
-                if !components.isEmpty { components.removeLast() }
-                continue
-            }
-            components.append(component)
-        }
-        return "/" + components.joined(separator: "/")
-    }
-
-    static func relativePath(from directory: String, to target: String) -> String {
-        let base = directory.split(separator: "/")
-        let goal = target.split(separator: "/")
-        var common = 0
-        while common < base.count, common < goal.count, base[common] == goal[common] { common += 1 }
-        let parts = Array(repeating: "..", count: base.count - common) + goal[common...].map(String.init)
-        return parts.isEmpty ? "." : parts.joined(separator: "/")
-    }
 }
 
 // MARK: - Planning and writing
