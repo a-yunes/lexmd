@@ -305,15 +305,16 @@ private struct SettingsSearchField: NSViewRepresentable {
 private struct ShortcutRecorder: View {
     let action: ShortcutAction
     @Environment(AppModel.self) private var model
-    @State private var isRecording = false
-    @State private var monitor: Any?
+
+    /// One recorder at a time: starting this one stops any other.
+    private var isRecording: Bool { model.recordingShortcut == action }
 
     var body: some View {
         let shortcut = model.shortcut(for: action)
         let isCustomized = model.isCustomized(action)
         HStack(spacing: 6) {
             Button {
-                isRecording ? stopRecording() : startRecording()
+                isRecording ? model.stopRecordingShortcut() : model.startRecordingShortcut(action, in: NSApp.keyWindow)
             } label: {
                 Text(isRecording ? "Type Shortcut…" : (shortcut?.display ?? "None"))
                     .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -353,41 +354,6 @@ private struct ShortcutRecorder: View {
             .allowsHitTesting(isCustomized)
             .accessibilityHidden(!isCustomized)
         }
-        .onDisappear { stopRecording() }
-    }
-
-    private func startRecording() {
-        stopRecording()
-        isRecording = true
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
-            if event.keyCode == 53, modifiers.isEmpty {
-                stopRecording()
-            } else if (event.keyCode == 51 || event.keyCode == 117), modifiers.isEmpty {
-                model.setShortcut(nil, for: action)
-                stopRecording()
-            } else if let shortcut = Shortcut(event: event, allowingPlainKeys: action.allowsPlainKeys) {
-                if let note = shortcut.reservationNote {
-                    // Keep recording so another combination can be tried right away.
-                    model.shortcutNote = note
-                    AccessibilityNotification.Announcement(note).post()
-                    NSSound.beep()
-                } else {
-                    model.setShortcut(shortcut, for: action)
-                    stopRecording()
-                }
-            } else {
-                NSSound.beep()
-            }
-            return nil
-        }
-    }
-
-    private func stopRecording() {
-        isRecording = false
-        if let monitor {
-            NSEvent.removeMonitor(monitor)
-            self.monitor = nil
-        }
+        .onDisappear { if isRecording { model.stopRecordingShortcut() } }
     }
 }

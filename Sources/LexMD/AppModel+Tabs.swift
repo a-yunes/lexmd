@@ -39,6 +39,14 @@ extension AppModel {
                 selectTab(existing.id)
                 return
             }
+            saveNow()
+            if currentFile != nil, text != savedText {
+                // The open text couldn't be written: it stays in its tab, and the document opens
+                // in a new one, so loading in place never replaces text that isn't on disk.
+                guard tabStore.list.activeID != nil else { NSSound.beep(); return }
+                openInNewTab(path)
+                return
+            }
             load(URL(fileURLWithPath: path), recordsHistory: recordsHistory)
         }
         selectedPath = currentFile?.path
@@ -149,7 +157,7 @@ extension AppModel {
         for tab in tabStore.list.tabs where tab.id != tabStore.list.activeID {
             guard let unsaved = tab.state.unsavedText else { continue }
             do {
-                try unsaved.write(toFile: tab.path, atomically: false, encoding: .utf8)
+                try TextFile.writeKeepingFormat(unsaved, toPath: tab.path)
                 tabStore.list.update(tab.id) { $0.state.unsavedText = nil }
             } catch {
                 continue
@@ -202,7 +210,7 @@ extension AppModel {
         guard !displayActiveTab() else { return }
         // The file is gone or unreadable: drop its tab and stay on the previous one.
         NSSound.beep()
-        tabStore.list.close(id, remember: false)
+        closeUnreadableTab(id)
         if let previous, let tab = tabStore.list.tab(previous), tab.path == currentFile?.path {
             tabStore.list.activate(previous)
             (history, historyIndex) = savedHistory
@@ -236,8 +244,11 @@ extension AppModel {
         if id == tabStore.list.activeID {
             saveNow()
             guard text == savedText else {
+                let shown = text
                 confirmDiscard(tab.title) { [weak self] in
-                    guard let self else { return }
+                    // The answer applies to the text the question was about. If another tab
+                    // was brought forward meanwhile, nothing is discarded.
+                    guard let self, self.tabStore.list.activeID == id, self.text == shown else { NSSound.beep(); return }
                     self.savedText = self.text
                     self.saveError = nil
                     self.finishClosingActiveTab(id)
@@ -247,9 +258,10 @@ extension AppModel {
             finishClosingActiveTab(id)
         } else if tab.state.unsavedText != nil {
             confirmDiscard(tab.title) { [weak self] in
-                self?.tabStore.list.update(id) { $0.state.unsavedText = nil }
-                self?.tabStore.list.close(id)
-                self?.persistTabs()
+                guard let self, self.tabStore.list.activeID != id, self.tabStore.list.tab(id) != nil else { NSSound.beep(); return }
+                self.tabStore.list.update(id) { $0.state.unsavedText = nil }
+                self.tabStore.list.close(id)
+                self.persistTabs()
             }
         } else {
             tabStore.list.close(id)
@@ -306,12 +318,15 @@ extension AppModel {
         state.previewFraction = previousFraction
         state.history = history
         state.historyIndex = historyIndex
-        state.find = isFindBarVisible ? TabFindState(query: findQuery, caseSensitive: findCaseSensitive, index: findIndex) : nil
+        state.find = isFindBarVisible ? TabFindState(query: findQuery, options: findOptions, index: findIndex) : nil
         state.unsavedText = text != savedText ? text : nil
+        state.unsavedBase = state.unsavedText == nil ? nil : loadedText
         tabStore.list.update(id) { $0.state = state }
-        // The script runs before the next document renders, so this reads the outgoing page.
-        preview.readScrollFraction { [weak self] fraction in
-            self?.tabStore.list.update(id) { $0.state.previewFraction = fraction }
+        // Read only while the page still shows this tab's document: after a quick switch the
+        // page may show another tab's, whose position would be saved here.
+        guard let path = currentFile?.path else { return }
+        preview.readScrollFraction(of: path) { [weak self] fraction in
+            self?.tabStore.list.updateOpenOrClosed(id) { $0.state.previewFraction = fraction }
         }
     }
 
@@ -320,10 +335,31 @@ extension AppModel {
         while let id = tabStore.list.activeID {
             if displayActiveTab() { return }
             NSSound.beep()
-            tabStore.list.close(id, remember: false)
+            closeUnreadableTab(id)
         }
         closeDocument()
         persistTabs()
+    }
+
+    /// Closes a tab whose file can't be read. Text it held that never reached the disk is
+    /// offered to be kept in another folder rather than dropped with the tab.
+    private func closeUnreadableTab(_ id: UUID) {
+        let tab = tabStore.list.tab(id)
+        tabStore.list.close(id, remember: false)
+        guard let tab, let unsaved = tab.state.unsavedText else { return }
+        let documents = [(path: tab.path, text: unsaved)]
+        Self.keepUnsavedElsewhere(documents, { Self.unreadableDocumentAlert(documents: documents) }) {}
+    }
+
+    /// A tab's file can no longer be read, and its unsaved text couldn't be written back.
+    static func unreadableDocumentAlert(documents: [(path: String, text: String)]) -> NSAlert {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "“\((documents[0].path as NSString).lastPathComponent)” is no longer available"
+        alert.informativeText = "Its changes couldn’t be saved because the file can’t be read or written. Save them in another folder to keep them."
+        alert.addButton(withTitle: "Save to Folder…")
+        alert.addDestructiveButton("Discard Changes")
+        return alert
     }
 
     /// Loads the active tab's document and restores its view state.
@@ -331,7 +367,7 @@ extension AppModel {
         guard let target = tabStore.list.active else { return false }
         if let unsaved = target.state.unsavedText, !FileManager.default.fileExists(atPath: target.path) {
             // Keep text that never reached the disk by writing it back where it belongs.
-            try? unsaved.write(toFile: target.path, atomically: false, encoding: .utf8)
+            try? TextFile.writeKeepingFormat(unsaved, toPath: target.path)
         }
         let saved = target.state
         history = saved.history.isEmpty ? [target.path] : saved.history
@@ -350,9 +386,12 @@ extension AppModel {
         if let unsaved = state.unsavedText, unsaved != text {
             editor.replaceText(unsaved)
             editor.onTextChange?(unsaved)
+            if let base = state.unsavedBase { loadedText = base }
         }
         if let find = state.find {
-            findCaseSensitive = find.caseSensitive
+            findCaseSensitive = find.options.caseSensitive
+            findWholeWord = find.options.wholeWord
+            findUsesRegex = find.options.regex
             findQuery = find.query
             isFindBarVisible = true
             findIndex = find.index
@@ -384,7 +423,12 @@ extension AppModel {
     }
 
     private func confirmDiscard(_ title: String, discard: @escaping () -> Void) {
-        present(Self.discardConfirmation(title)) { response in
+        Self.askToDiscard(title, discard)
+    }
+
+    /// Asks whether to discard a tab's unsaved changes, running `discard` on yes. Replaced in tests.
+    static var askToDiscard: (_ title: String, _ discard: @escaping () -> Void) -> Void = { title, discard in
+        AppModel.shared.present(AppModel.discardConfirmation(title)) { response in
             if response == .alertFirstButtonReturn { discard() }
         }
     }

@@ -6,7 +6,8 @@ import WebKit
 final class PreviewController: NSObject, WKNavigationDelegate {
     let webView: WKWebView
     var onOpenURL: ((URL) -> Void)?
-    var onHighlightCount: ((Int) -> Void)?
+    /// The number of matches the page marked, and the document the page showed then.
+    var onHighlightCount: ((Int, String?) -> Void)?
     /// The id of the heading in view as the preview scrolls (empty above the first heading).
     var onHeadingChange: ((String) -> Void)?
     /// Pinch gestures, in text size steps (positive is bigger).
@@ -38,7 +39,16 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     /// The latest template load; callbacks for loads it superseded are ignored.
     private var templateNavigation: WKNavigation?
     private var templateRetries = 0
+    /// When the page's web process ended recently; too many in a row stop the reloads.
+    private var recentCrashes: [Date] = []
     private var lastHTML = ""
+    /// The document and render that the next flush sends, and the ones the page shows.
+    private var lastDocument: String?
+    private var lastGeneration = 0
+    private(set) var shownDocument: String?
+    private(set) var shownGeneration = -1
+    /// How far the page was last scrolled, as it reported; restored after the page reloads.
+    private var lastScrollFraction: Double = 0
     private var lastBase: URL?
     private var pendingReset = false
     /// True from `render` until the markup reaches the page.
@@ -92,7 +102,7 @@ final class PreviewController: NSObject, WKNavigationDelegate {
             self, selector: #selector(displayOptionsDidChange(_:)),
             name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil
         )
-        loadTemplate()
+        startTemplateLoad()
     }
 
     @objc private func displayOptionsDidChange(_ notification: Notification) {
@@ -121,7 +131,21 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         )
     }
 
+    /// Starts a fresh load with a full retry budget.
+    private func startTemplateLoad() {
+        templateRetries = 0
+        loadTemplate()
+    }
+
     private func loadTemplate() {
+        // The page that comes back shows nothing until the next flush.
+        if shownDocument != nil, pendingScrollFraction == nil, pendingHeading == nil {
+            // Keep the reader's place across the reload; the flush after it reapplies it.
+            pendingScrollFraction = lastScrollFraction
+            hasNewRender = true
+        }
+        shownDocument = nil
+        shownGeneration = -1
         isLoaded = false
         isLoadingTemplate = true
         pageLibraries = injectedLibraries
@@ -132,17 +156,32 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     func setAllowsRemoteContent(_ value: Bool) {
         guard value != allowsRemoteContent else { return }
         allowsRemoteContent = value
-        loadTemplate()
+        startTemplateLoad()
     }
 
-    func render(html: String, baseURL: URL?, resetScroll: Bool) {
+    /// `document` and `generation` identify the render, so callers can tell whether the page
+    /// shows it yet (see `shows(_:generation:)`).
+    func render(html: String, baseURL: URL?, resetScroll: Bool, document: String? = nil, generation: Int = 0) {
         let baseChanged = baseURL != lastBase
         lastHTML = html
         lastBase = baseURL
+        lastDocument = document
+        lastGeneration = generation
         hasNewRender = true
         pendingReset = pendingReset || resetScroll || baseChanged
-        guard isLoaded else { return }
+        guard isLoaded else {
+            // A page that gave up loading, or stopped after repeated crashes, gets another try
+            // with new content.
+            if !isLoadingTemplate { startTemplateLoad() }
+            return
+        }
         flush()
+    }
+
+    /// Whether the loaded page shows `document`, and with `generation` the render it was given.
+    func shows(_ document: String?, generation: Int? = nil) -> Bool {
+        guard isLoaded, document != nil, shownDocument == document else { return false }
+        return generation.map { $0 == shownGeneration } ?? true
     }
 
     private func flush() {
@@ -154,8 +193,12 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         hasNewRender = false
         loadLibraries(for: lastHTML)
         call("lexmdRender(html, base, reset)", ["html": lastHTML, "base": base, "reset": reset])
+        shownDocument = lastDocument
+        shownGeneration = lastGeneration
+        var revealed = false
         if let heading = pendingHeading, isNewRender || !heading.afterRender {
             pendingHeading = nil
+            revealed = true
             call("lexmdReveal(id, false)", ["id": heading.id])
         }
         if highlight != nil || highlightApplied {
@@ -164,7 +207,8 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         }
         if isNewRender, let fraction = pendingScrollFraction {
             pendingScrollFraction = nil
-            call("lexmdScroll(f)", ["f": fraction])
+            // A heading the reader asked for wins over the position the tab remembered.
+            if !revealed { call("lexmdScroll(f)", ["f": fraction]) }
         }
     }
 
@@ -209,8 +253,9 @@ final class PreviewController: NSObject, WKNavigationDelegate {
             "q": h?.query ?? "", "cs": h?.options.caseSensitive ?? false, "word": h?.options.wholeWord ?? false,
             "regex": h?.options.regex ?? false, "current": h?.current ?? -1, "scroll": scroll,
         ]
+        let document = shownDocument
         call("return lexmdFind(q, cs, word, regex, current, scroll)", args) { [weak self] result in
-            self?.onHighlightCount?((result as? NSNumber)?.intValue ?? 0)
+            self?.onHighlightCount?((result as? NSNumber)?.intValue ?? 0, document)
         }
     }
 
@@ -219,9 +264,9 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         call("lexmdScroll(f)", ["f": Double(fraction)])
     }
 
-    /// Reports how far the page is scrolled, from 0 to 1.
-    func readScrollFraction(_ completion: @escaping (Double) -> Void) {
-        guard isLoaded else { return }
+    /// Reports how far the page is scrolled, from 0 to 1, when it shows `document`.
+    func readScrollFraction(of document: String, _ completion: @escaping (Double) -> Void) {
+        guard shows(document) else { return }
         let body = "var max = document.documentElement.scrollHeight - window.innerHeight; return max > 0 ? window.scrollY / max : 0"
         call(body, [:]) { completion(($0 as? NSNumber)?.doubleValue ?? 0) }
     }
@@ -278,6 +323,8 @@ final class PreviewController: NSObject, WKNavigationDelegate {
             NSPasteboard.general.setString(text, forType: .string)
         } else if type == "heading", let id = body["id"] as? String {
             onHeadingChange?(id)
+        } else if type == "scroll", let fraction = body["f"] as? Double {
+            lastScrollFraction = fraction
         }
     }
 
@@ -306,8 +353,21 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         return components.url ?? file
     }
 
+    /// Reloads after the page's process ends. Content that keeps ending it (a huge image, for
+    /// example) would reload forever, so after three crashes within a minute the page waits for
+    /// the next render to try again.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        loadTemplate()
+        let now = Date()
+        recentCrashes = recentCrashes.filter { now.timeIntervalSince($0) < 60 } + [now]
+        guard recentCrashes.count <= 3 else {
+            Self.log.error("Preview stopped reloading after repeated crashes")
+            shownDocument = nil
+            isLoaded = false
+            isLoadingTemplate = false
+            templateNavigation = nil
+            return
+        }
+        startTemplateLoad()
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {

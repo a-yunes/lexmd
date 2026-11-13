@@ -52,9 +52,10 @@ struct OnboardingView: View {
         }
         .padding(40)
         .frame(width: 540, height: min(600, heightLimit))
-        .onChange(of: step) { _, step in
-            // The tour shows LexMD working on a real project, so the demo opens behind the sheet.
-            if step == .tour, !DemoProject.isDemo(model.rootURL) { model.openDemoProject() }
+        .onChange(of: step) { previous, step in
+            // The tour shows LexMD working on a real project, so the demo opens behind the sheet
+            // on the way in from Welcome. Coming Back to the tour keeps a project chosen since.
+            if previous == .welcome, step == .tour, !DemoProject.isDemo(model.rootURL) { model.openDemoProject() }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             isDefaultApp = MarkdownDefaultApp.isLexMD

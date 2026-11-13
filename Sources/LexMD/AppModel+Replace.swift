@@ -6,6 +6,18 @@ extension AppModel {
     /// Whether the editor is on screen, for the editor's text commands.
     var isEditorVisible: Bool { currentFile != nil && viewMode != .read }
 
+    /// Replacing edits the Markdown source, so it happens where the source shows. In Preview
+    /// Only the page's matches leave out link targets, comments and other text that isn't
+    /// rendered, so its count and current match can't say which source match to replace.
+    /// Returns true when it switched the view, so the caller stops and lets the user see the
+    /// match in the editor first.
+    private func showSourceForReplace() -> Bool {
+        guard viewMode == .read else { return false }
+        setViewMode(.split, focusesEditor: false)
+        refreshFind(scroll: true)
+        return true
+    }
+
     func toggleReplace() {
         if isReplaceVisible {
             isReplaceVisible = false
@@ -27,10 +39,11 @@ extension AppModel {
     /// selection that is itself a match, that match is the one replaced.
     func replaceCurrent() {
         guard currentFile != nil, let regex = findPattern else { NSSound.beep(); return }
+        guard !showSourceForReplace() else { return }
         let matches = FindReplace.matches(of: regex, in: text)
         guard !matches.isEmpty else { NSSound.beep(); return }
         let selection = editor.textView.selectedRange()
-        let index = viewMode != .read ? matches.firstIndex { $0.range == selection } : nil
+        let index = matches.firstIndex { $0.range == selection }
         let match = matches[index ?? min(findIndex, matches.count - 1)]
         let replacement = FindReplace.replacement(
             for: match, of: regex, in: text, template: replaceQuery, expandsTemplate: findUsesRegex
@@ -49,6 +62,7 @@ extension AppModel {
     /// Replaces every match in the document as one undoable change.
     func replaceAll() {
         guard currentFile != nil, let regex = findPattern else { NSSound.beep(); return }
+        guard !showSourceForReplace() else { return }
         let edits = FindReplace.edits(of: regex, in: text, template: replaceQuery, expandsTemplate: findUsesRegex)
         guard !edits.isEmpty, editor.replace(edits, actionName: "Replace All") else {
             NSSound.beep()

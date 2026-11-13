@@ -30,6 +30,8 @@ extension AppModel {
             findQuery = findQueryText(for: selection)
         }
         isFindBarVisible = true
+        // Replace works on the source; see showSourceForReplace.
+        if replacing, viewMode == .read { setViewMode(.split, focusesEditor: false) }
         let showsReplace = replacing && !isReplaceVisible
         isReplaceVisible = replacing
         // A replace field that is about to appear focuses itself; see FindBar.
@@ -118,6 +120,8 @@ extension AppModel {
         if quickMode != mode {
             quickQueries[quickMode] = quickQuery
             quickMode = mode
+            // New Tab applies to the Open Quickly it opened, not to a search switched to after.
+            quickOpensInNewTab = false
             quickQuery = quickQueries[mode] ?? ""
         }
         if mode == .everything, let selection = editor.selectedSingleLineText() { quickQuery = selection }
@@ -200,24 +204,25 @@ extension AppModel {
             if newTab { openInNewTab(file.path) } else { showDocument(file.path) }
         case .hit(let hit):
             reveal(hit.path)
+            let found = (query: quickResults.query, options: quickResults.options)
             if newTab { openInNewTab(hit.path) } else { showDocument(hit.path) }
-            revealOccurrence(hit.occurrence)
+            // The file may not have opened (it can't be read); the open document keeps its place.
+            guard currentFile?.path == hit.path else { return }
+            revealOccurrence(hit.occurrence, query: found.query, options: found.options)
         }
     }
 
-    /// Selects the n-th match of the current query in the open document and scrolls both panes to it.
-    private func revealOccurrence(_ occurrence: Int) {
-        guard let regex = try? QuickSearchEngine.regex(for: quickRegexQuery, options: quickOptions) else { return }
+    /// Selects the n-th match of the search that found it in the open document and scrolls both
+    /// panes to it.
+    private func revealOccurrence(_ occurrence: Int, query: String, options: SearchOptions) {
+        let pattern = options.regex ? query : query.trimmingCharacters(in: .whitespaces)
+        guard let regex = try? QuickSearchEngine.regex(for: pattern, options: options) else { return }
         let ranges = QuickSearchEngine.matches(of: regex, in: text)
         guard !ranges.isEmpty else { return }
         let index = min(occurrence, ranges.count - 1)
         editor.reveal(ranges[index], indicator: true, select: true)
         transientHighlight = true
-        preview.setHighlight(.init(query: quickRegexQuery, options: quickOptions, current: index), scroll: true)
-    }
-
-    private var quickRegexQuery: String {
-        quickOptions.regex ? quickQuery : quickQuery.trimmingCharacters(in: .whitespaces)
+        preview.setHighlight(.init(query: pattern, options: options, current: index), scroll: true)
     }
 
     /// The project's files changed while the panel is open: search again. Unless newer results
@@ -281,7 +286,10 @@ extension AppModel {
             guard let self else { return }
             if cachedFiles == nil, self.treeGeneration == generation { self.searchFiles = files }
             guard !Task.isCancelled else { return }
-            self.showQuickResults(results, keepingSelected: selected)
+            var found = results
+            found.query = query
+            found.options = options
+            self.showQuickResults(found, keepingSelected: selected)
             if let inNewTab = self.quickPendingActivation {
                 self.quickPendingActivation = nil
                 self.activateQuickItem(at: self.quickSelection, inNewTab: inNewTab)

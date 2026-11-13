@@ -626,19 +626,46 @@ struct TextFile: Sendable {
         return nil
     }
 
-    /// Writes atomically next to the original, keeping its permissions and other attributes.
-    /// A symbolic link stays a link: the file it points to is written.
-    func write(to link: URL) throws {
-        let url = link.resolvingSymlinksInPath()
-        guard var data = text.data(using: encoding) else { throw CocoaError(.fileWriteInapplicableStringEncoding) }
-        if hasBOM {
-            switch encoding {
+    /// How a file's text is stored on disk.
+    struct Format: Sendable, Equatable {
+        var encoding: String.Encoding
+        var hasBOM: Bool
+        static let utf8 = Format(encoding: .utf8, hasBOM: false)
+    }
+
+    var format: Format { Format(encoding: encoding, hasBOM: hasBOM) }
+
+    /// The bytes for `text` in `format`. Fails rather than changing the encoding when the text
+    /// has characters the encoding can't hold.
+    static func data(_ text: String, as format: Format) throws -> Data {
+        guard var data = text.data(using: format.encoding) else { throw CocoaError(.fileWriteInapplicableStringEncoding) }
+        if format.hasBOM {
+            switch format.encoding {
             case .utf8: data = Data([0xEF, 0xBB, 0xBF]) + data
             case .utf16LittleEndian: data = Data([0xFF, 0xFE]) + data
             case .utf16BigEndian: data = Data([0xFE, 0xFF]) + data
             default: break
             }
         }
+        return data
+    }
+
+    /// Writes in place rather than by replacing the file, so file watchers see a modification.
+    static func writeInPlace(_ text: String, to url: URL, as format: Format) throws {
+        try data(text, as: format).write(to: url)
+    }
+
+    /// Writes `text` to `path`, keeping the encoding of the file already there (UTF-8 for a new one).
+    static func writeKeepingFormat(_ text: String, toPath path: String) throws {
+        let url = URL(fileURLWithPath: path)
+        try writeInPlace(text, to: url, as: read(url)?.format ?? .utf8)
+    }
+
+    /// Writes atomically next to the original, keeping its permissions and other attributes.
+    /// A symbolic link stays a link: the file it points to is written.
+    func write(to link: URL) throws {
+        let url = link.resolvingSymlinksInPath()
+        let data = try Self.data(text, as: format)
         let temporary = url.deletingLastPathComponent()
             .appendingPathComponent(".\(url.lastPathComponent).lexmd-\(UUID().uuidString)")
         try data.write(to: temporary)
@@ -673,7 +700,19 @@ enum LinkUpdater {
     /// The rewrite context for a move. Folder moves list their contents for wiki links.
     /// `markdownFiles` are the project's Markdown files at their current locations.
     static func context(root: String, move: PathMove, markdownFiles: [String]) -> LinkRewriter.Context {
+        context(root: root, moves: [move], markdownFiles: markdownFiles)
+    }
+
+    /// The rewrite context for items moved together, such as one drop of several items, so
+    /// links between them stay as they are.
+    static func context(root: String, moves: [PathMove], markdownFiles: [String]) -> LinkRewriter.Context {
         var moved: [(old: String, new: String)] = []
+        for move in moves { appendMovedFiles(of: move, to: &moved) }
+        let wiki = WikiRenames(root: root, moves: moves, markdownFiles: markdownFiles, movedFiles: moved)
+        return LinkRewriter.Context(moves: moves, wiki: wiki)
+    }
+
+    private static func appendMovedFiles(of move: PathMove, to moved: inout [(old: String, new: String)]) {
         var isDirectory: ObjCBool = false
         if FileManager.default.fileExists(atPath: move.to, isDirectory: &isDirectory), isDirectory.boolValue {
             let base = URL(fileURLWithPath: move.to, isDirectory: true)
@@ -689,8 +728,6 @@ enum LinkUpdater {
         } else {
             moved.append((move.from, move.to))
         }
-        let wiki = WikiRenames(root: root, moves: [move], markdownFiles: markdownFiles, movedFiles: moved)
-        return LinkRewriter.Context(moves: [move], wiki: wiki)
     }
 
     /// Counts the links that would change. `overrides` holds unsaved text for open documents.

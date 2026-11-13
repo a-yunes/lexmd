@@ -74,7 +74,14 @@ extension AppModel {
             var isDirectory: ObjCBool = false
             return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) ? isDirectory.boolValue : nil
         }
-        if let folder = plan.folder { open(URL(fileURLWithPath: folder, isDirectory: true)) }
-        for path in plan.files { openPath(path, inNewTab: true) }
+        let openFiles = { [weak self] in
+            for path in plan.files { self?.openPath(path, inNewTab: true) }
+        }
+        // The files open in the new project once it is open, which may take a question first.
+        if let folder = plan.folder {
+            open(URL(fileURLWithPath: folder, isDirectory: true), then: openFiles)
+        } else {
+            openFiles()
+        }
     }
 }

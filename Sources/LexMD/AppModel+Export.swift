@@ -64,8 +64,13 @@ extension AppModel {
         let range = textView.selectedRange()
         let editorSelection = textView.window?.firstResponder === textView && range.length > 0
             ? (textView.string as NSString).substring(with: range) : nil
-        let useLivePreview = editorSelection == nil && preview.isPageLoaded
+        // The live page is used only when it shows this document's latest text; otherwise the
+        // document is rendered offscreen from the snapshot.
+        let useLivePreview = editorSelection == nil && preview.shows(currentFile?.path, generation: renderGeneration)
         let previewSelection = viewMode != .edit
+        copyGeneration += 1
+        let generation = copyGeneration
+        let changeCount = pasteboard.changeCount
         Task { @MainActor [weak self] in
             do {
                 let rich: Exporter.RichText
@@ -78,6 +83,8 @@ extension AppModel {
                 } else {
                     rich = try await Exporter.richText(document)
                 }
+                // A newer copy, from here or anywhere else, has the pasteboard now.
+                guard self?.copyGeneration == generation, pasteboard.changeCount == changeCount else { return }
                 Exporter.write(rich, to: pasteboard)
             } catch {
                 self?.showExportError(error, file: nil)

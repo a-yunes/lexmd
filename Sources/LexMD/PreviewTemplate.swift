@@ -241,12 +241,21 @@ enum PreviewTemplate {
     spyId = id;
     window.webkit.messageHandlers.lexmd.postMessage({ type: 'heading', id: id });
   }
+  var reportedFraction = -1;
+  function reportScroll() {
+    var max = document.documentElement.scrollHeight - window.innerHeight;
+    var f = max > 0 ? window.scrollY / max : 0;
+    if (Math.abs(f - reportedFraction) < 0.001) return;
+    reportedFraction = f;
+    window.webkit.messageHandlers.lexmd.postMessage({ type: 'scroll', f: f });
+  }
   function queueSpy() {
     if (spyTimer || resizing) return;
     spyTimer = setTimeout(function () {
       spyTimer = null;
       if (resizing) return;
       captureAnchor();
+      reportScroll();
       if (spyPin) {
         var arrived = Math.abs(window.scrollY - spyPin.y) <= 2;
         if (arrived) spyPin.arrived = true;

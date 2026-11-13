@@ -112,6 +112,17 @@ final class GitModel {
         }
     }
 
+    /// The project closed or another one is opening: nothing is shown for its repositories
+    /// until the next project is scanned.
+    func projectClosed() {
+        clear()
+        projectRoot = nil
+        folders = []
+        isDiscovering = false
+        // A commit in progress keeps its sheet, which shows how it ended.
+        if commitSession?.isCommitting != true { commitSession = nil }
+    }
+
     private func clear() {
         discoverTask?.cancel()
         discoverTask = nil
@@ -246,6 +257,8 @@ final class GitModel {
     // MARK: - Commit sheet
 
     func presentCommitSheet(currentFile: String?) {
+        // The sheet is already showing; a new session would drop a commit in progress.
+        guard commitSession == nil else { return }
         guard let git = tool, let root = projectRoot,
               let preferred = commitTarget(currentFile: currentFile) else { NSSound.beep(); return }
         commitSession = CommitSession(git: git, projectRoot: root, repositories: repositories, repository: preferred)
