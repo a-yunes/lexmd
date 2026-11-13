@@ -459,7 +459,7 @@ extension AppModel {
             if file.path == current {
                 let before = text
                 let edits = LinkRewriter.edits(in: text, oldPath: oldPath, newPath: file.path, context: context)
-                if editor.applyEdits(edits, actionName: "Update Links") {
+                if editor.replace(edits, actionName: "Update Links") {
                     record.openDocument = RewrittenFile(path: file.path, before: before, after: editor.textView.string)
                 }
             } else if let tab = tabStore.list.tabs.first(where: { $0.path == file.path && $0.state.unsavedText != nil }),
@@ -498,7 +498,7 @@ extension AppModel {
             let oldPath = context.oldLocation(of: path)
             if path == currentFile?.path {
                 let edits = LinkRewriter.edits(in: text, oldPath: oldPath, newPath: path, context: context)
-                editor.applyEdits(edits, actionName: "Update Links")
+                editor.replace(edits, actionName: "Update Links")
             } else if let tab = tabStore.list.tab(withPath: path), let unsaved = tab.state.unsavedText {
                 let edits = LinkRewriter.edits(in: unsaved, oldPath: oldPath, newPath: path, context: context)
                 if !edits.isEmpty { tabStore.list.update(tab.id) { $0.state.unsavedText = TextEdit.apply(edits, to: unsaved) } }

@@ -68,7 +68,7 @@ struct FindReplaceTests {
         let regex = try QuickSearchEngine.regex(for: "cat", options: SearchOptions())
         let edits = FindReplace.edits(of: regex, in: original, template: "lynx", expandsTemplate: false)
         #expect(edits.count == 6)
-        #expect(editor.replaceMatches(edits, actionName: "Replace All"))
+        #expect(editor.replace(edits, actionName: "Replace All"))
         let expected = original.replacingOccurrences(of: "cat", with: "lynx")
         #expect(editor.textView.string == expected)
         #expect(reported == expected, "the model hears about the change, so it autosaves")
@@ -89,10 +89,10 @@ struct FindReplaceTests {
     @Test func overlappingOrOutOfRangeEditsAreRefused() {
         let editor = EditorController()
         editor.load("abcdef")
-        #expect(!editor.replaceMatches([TextEdit(range: NSRange(location: 0, length: 3), replacement: "x"),
+        #expect(!editor.replace([TextEdit(range: NSRange(location: 0, length: 3), replacement: "x"),
                                         TextEdit(range: NSRange(location: 2, length: 2), replacement: "y")], actionName: "Replace All"))
-        #expect(!editor.replaceMatches([TextEdit(range: NSRange(location: 5, length: 3), replacement: "x")], actionName: "Replace"))
-        #expect(!editor.replaceMatches([], actionName: "Replace"))
+        #expect(!editor.replace([TextEdit(range: NSRange(location: 5, length: 3), replacement: "x")], actionName: "Replace"))
+        #expect(!editor.replace([], actionName: "Replace"))
         #expect(editor.textView.string == "abcdef")
     }
 

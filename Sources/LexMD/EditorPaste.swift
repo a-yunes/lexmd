@@ -265,22 +265,9 @@ enum SmartPaste {
 }
 
 extension EditorController {
-    /// Replaces text as one undoable edit that autosave and highlighting see.
-    @discardableResult
-    func replaceText(in range: NSRange, with string: String, actionName: String) -> Bool {
-        textView.breakUndoCoalescing()
-        guard textView.shouldChangeText(in: range, replacementString: string),
-              let storage = textView.textStorage else { return false }
-        storage.replaceCharacters(in: range, with: NSAttributedString(string: string, attributes: textView.typingAttributes))
-        textView.didChangeText()
-        textView.undoManager?.setActionName(actionName)
-        textView.breakUndoCoalescing()
-        return true
-    }
-
     /// Inserts text over `range` and puts the caret after it.
     private func insert(_ string: String, over range: NSRange, actionName: String) {
-        guard replaceText(in: range, with: string, actionName: actionName) else { return }
+        guard replace([TextEdit(range: range, replacement: string)], actionName: actionName) else { return }
         let end = range.location + (string as NSString).length
         textView.setSelectedRange(NSRange(location: end, length: 0))
         textView.scrollRangeToVisible(NSRange(location: end, length: 0))

@@ -272,6 +272,20 @@ struct EditorFeatureTests {
         #expect(harness.text == "Text\n\n|a|b|c\n|:-|-:|:-:|\n|longer|x|\n|1|2|3|4\n\nAfter")
     }
 
+    /// Undoing a table edit reaches the model as well as the text view, so autosave never keeps
+    /// the text from before the undo.
+    @Test func undoingATableEditTellsTheModel() async throws {
+        let original = "|a|b|\n|-|-|\n|1|2|"
+        let harness = Harness(original, selection: NSRange(location: 1, length: 0))
+        var reported: String?
+        harness.editor.onTextChange = { reported = $0 }
+        harness.editor.formatTable()
+        #expect(reported != nil && reported != original)
+        harness.undo()
+        #expect(harness.text == original)
+        try await waitUntil(seconds: 2) { reported == original }
+    }
+
     @Test func formatTableUsesDisplayWidth() {
         let harness = Harness("| 名前 | 😀 | x |\n|-|-|-|\n| ab | 👍🏽 | é |", selection: NSRange(location: 2, length: 0))
         harness.editor.formatTable()

@@ -321,6 +321,6 @@ extension EditorController {
         while suffix > 0, UTF16.isTrailSurrogate(a[a.count - suffix]) { suffix -= 1 }
         let replaced = NSRange(location: range.location + prefix, length: a.count - prefix - suffix)
         let replacement = String(utf16CodeUnits: Array(b[prefix..<(b.count - suffix)]), count: b.count - prefix - suffix)
-        replaceText(in: replaced, with: replacement, actionName: actionName)
+        replace([TextEdit(range: replaced, replacement: replacement)], actionName: actionName)
     }
 }

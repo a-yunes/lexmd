@@ -415,39 +415,4 @@ extension EditorController {
         clip.scroll(to: target)
         scrollView.reflectScrolledClipView(clip)
     }
-
-    /// Replaces ranges as one undoable change, so Edit > Undo reverts them together.
-    @discardableResult
-    func applyEdits(_ edits: [TextEdit], actionName: String) -> Bool {
-        guard !edits.isEmpty else { return false }
-        textView.breakUndoCoalescing()
-        var applied = false
-        for edit in edits.sorted(by: { $0.range.location > $1.range.location }) {
-            guard NSMaxRange(edit.range) <= (textView.string as NSString).length,
-                  textView.shouldChangeText(in: edit.range, replacementString: edit.replacement) else { continue }
-            textView.textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
-            textView.didChangeText()
-            applied = true
-        }
-        if applied {
-            textView.undoManager?.setActionName(actionName)
-            registerTextChangeOnUndo()
-        }
-        textView.breakUndoCoalescing()
-        return applied
-    }
-
-    /// Undoing or redoing edits made through the text storage does not report the change to
-    /// the delegate, so the model would keep (and autosave) the text from before the undo. This
-    /// reports it once the undo or redo has run.
-    func registerTextChangeOnUndo() {
-        textView.undoManager?.registerUndo(withTarget: self) { editor in
-            MainActor.assumeIsolated {
-                editor.registerTextChangeOnUndo()
-                DispatchQueue.main.async {
-                    editor.textDidChange(Notification(name: NSText.didChangeNotification, object: editor.textView))
-                }
-            }
-        }
-    }
 }

@@ -63,33 +63,6 @@ struct TextSubstitutions: Equatable {
 }
 
 extension EditorController {
-    /// Replaces every range in one undoable step, with one change notification, so autosave,
-    /// the preview, and incremental highlighting each see a single edit. Ranges must not overlap.
-    @discardableResult
-    func replaceMatches(_ edits: [TextEdit], actionName: String) -> Bool {
-        guard !edits.isEmpty, !textView.hasMarkedText(), let storage = textView.textStorage else { return false }
-        let sorted = edits.sorted { $0.range.location < $1.range.location }
-        var end = 0
-        for edit in sorted {
-            guard edit.range.location >= end, NSMaxRange(edit.range) <= storage.length else { return false }
-            end = NSMaxRange(edit.range)
-        }
-        textView.breakUndoCoalescing()
-        guard textView.shouldChangeText(
-            inRanges: sorted.map { NSValue(range: $0.range) }, replacementStrings: sorted.map(\.replacement)
-        ) else { return false }
-        storage.beginEditing()
-        for edit in sorted.reversed() {
-            storage.replaceCharacters(in: edit.range, with: edit.replacement)
-        }
-        storage.endEditing()
-        textView.didChangeText()
-        textView.undoManager?.setActionName(actionName)
-        registerTextChangeOnUndo()
-        textView.breakUndoCoalescing()
-        return true
-    }
-
     /// The text view's automatic substitutions and spelling correction.
     var substitutions: TextSubstitutions {
         get {

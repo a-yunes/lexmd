@@ -463,3 +463,50 @@ final class EditorController: NSObject, NSTextViewDelegate {
         textView.typingAttributes = MarkdownHighlighter.baseAttributes(size: fontSize)
     }
 }
+
+// MARK: - Programmatic edits
+
+extension EditorController {
+    /// Replaces every range in one undoable step, with one change notification, so autosave,
+    /// the preview, and incremental highlighting each see a single edit, and so does undoing it.
+    /// Ranges must not overlap. Every programmatic text edit (paste, tables, find and replace,
+    /// link updates) goes through here.
+    @discardableResult
+    func replace(_ edits: [TextEdit], actionName: String) -> Bool {
+        guard !edits.isEmpty, !textView.hasMarkedText(), let storage = textView.textStorage else { return false }
+        let sorted = edits.sorted { $0.range.location < $1.range.location }
+        var end = 0
+        for edit in sorted {
+            guard edit.range.location >= end, NSMaxRange(edit.range) <= storage.length else { return false }
+            end = NSMaxRange(edit.range)
+        }
+        textView.breakUndoCoalescing()
+        guard textView.shouldChangeText(
+            inRanges: sorted.map { NSValue(range: $0.range) }, replacementStrings: sorted.map(\.replacement)
+        ) else { return false }
+        storage.beginEditing()
+        for edit in sorted.reversed() {
+            storage.replaceCharacters(in: edit.range, with: edit.replacement)
+        }
+        storage.endEditing()
+        textView.didChangeText()
+        textView.undoManager?.setActionName(actionName)
+        registerTextChangeOnUndo()
+        textView.breakUndoCoalescing()
+        return true
+    }
+
+    /// Undoing or redoing edits made through the text storage does not report the change to
+    /// the delegate, so the model would keep (and autosave) the text from before the undo. This
+    /// reports it once the undo or redo has run.
+    private func registerTextChangeOnUndo() {
+        textView.undoManager?.registerUndo(withTarget: self) { editor in
+            MainActor.assumeIsolated {
+                editor.registerTextChangeOnUndo()
+                DispatchQueue.main.async {
+                    editor.textDidChange(Notification(name: NSText.didChangeNotification, object: editor.textView))
+                }
+            }
+        }
+    }
+}

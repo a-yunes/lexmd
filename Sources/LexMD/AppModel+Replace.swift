@@ -35,7 +35,7 @@ extension AppModel {
         let replacement = FindReplace.replacement(
             for: match, of: regex, in: text, template: replaceQuery, expandsTemplate: findUsesRegex
         )
-        guard editor.replaceMatches([TextEdit(range: match.range, replacement: replacement)], actionName: "Replace") else {
+        guard editor.replace([TextEdit(range: match.range, replacement: replacement)], actionName: "Replace") else {
             NSSound.beep()
             return
         }
@@ -50,7 +50,7 @@ extension AppModel {
     func replaceAll() {
         guard currentFile != nil, let regex = findPattern else { NSSound.beep(); return }
         let edits = FindReplace.edits(of: regex, in: text, template: replaceQuery, expandsTemplate: findUsesRegex)
-        guard !edits.isEmpty, editor.replaceMatches(edits, actionName: "Replace All") else {
+        guard !edits.isEmpty, editor.replace(edits, actionName: "Replace All") else {
             NSSound.beep()
             return
         }

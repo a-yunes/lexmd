@@ -306,7 +306,7 @@ struct EditorLinkEditTests {
         let context = LinkRewriter.Context(moves: [rename])
         let edits = LinkRewriter.edits(in: original, oldPath: "/p/i.md", newPath: "/p/i.md", context: context)
         undo.beginUndoGrouping()
-        #expect(editor.applyEdits(edits, actionName: "Update Links"))
+        #expect(editor.replace(edits, actionName: "Update Links"))
         undo.endUndoGrouping()
         #expect(editor.textView.string == "[a](guide.md) text [b](guide.md#x)\n")
         #expect(reported == editor.textView.string, "the model hears about the change, so it autosaves")
