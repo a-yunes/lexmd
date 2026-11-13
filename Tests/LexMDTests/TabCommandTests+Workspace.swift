@@ -172,6 +172,30 @@ extension TabCommandTests {
         model.closeTabsForProjectChange()
     }
 
+    /// Renaming the open document moves it in every list that remembers it, recent files included,
+    /// as moving the whole project folder does.
+    @Test func renamingKeepsTheDocumentInRecentFiles() async throws {
+        let folder = try TestFolder()
+        try folder.write("a.md", "# A\n")
+        try folder.write("b.md", "# B\n")
+        let model = AppModel.shared
+        model.open(folder.url)
+        try await waitUntil { model.tree.count == 2 }
+        let path = { FileScanner.canonicalPath(folder.url.appendingPathComponent($0).path) }
+        let a = path("a.md")
+        model.open(URL(fileURLWithPath: a))
+        model.open(URL(fileURLWithPath: path("b.md")))
+        #expect(model.recentFiles.contains(a))
+
+        model.beginRename(URL(fileURLWithPath: a))
+        model.commitRename(a, to: "renamed")
+        let renamed = path("renamed.md")
+        try await waitUntil { FileManager.default.fileExists(atPath: renamed) }
+        #expect(model.recentFiles.contains(renamed))
+        #expect(!model.recentFiles.contains(a))
+        model.closeTabsForProjectChange()
+    }
+
     /// Unsaved text that can't be written into the Trash with its document is offered for saving
     /// elsewhere instead of being dropped with the tab.
     @Test func trashOffersToKeepTextItCouldNotMove() async throws {

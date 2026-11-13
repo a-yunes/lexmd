@@ -642,9 +642,24 @@ final class AppModel {
     /// autosave writes to the moved files), tabs, history, and saved settings.
     func followProjectMove(to newRoot: String) {
         guard let oldRoot = rootURL?.path, newRoot != oldRoot else { return }
-        let move = PathMove(from: oldRoot, to: newRoot)
-        let remap = { (path: String) in move.map(path) ?? path }
         rootURL = URL(fileURLWithPath: newRoot, isDirectory: true)
+        remapOpenPaths(PathMove(from: oldRoot, to: newRoot))
+        tree = tree.map { FileTreeEdit.rebased($0, to: newRoot + "/" + $0.name) }
+        recentFolders = Array(([newRoot] + recentFolders.filter { $0 != oldRoot && $0 != newRoot }).prefix(10))
+        defaults.set(recentFolders, forKey: Keys.recentFolders)
+        defaults.set(newRoot, forKey: Keys.root)
+        watch(newRoot)
+        saveNow()
+        render(debounce: false)
+        rescan()
+        filesDidChange(structure: true)
+    }
+
+    /// Moves every remembered path inside `move` along with it: the open document, the sidebar's
+    /// highlight, new folders, the rename field, expanded folders, history, recent files and tabs.
+    /// A moved project folder and an item moved inside the project both come through here.
+    func remapOpenPaths(_ move: PathMove) {
+        let remap = { (path: String) in move.map(path) ?? path }
         if let current = currentFile?.path, let moved = move.map(current) {
             currentFile = URL(fileURLWithPath: moved)
             defaults.set(moved, forKey: Keys.lastFile)
@@ -652,21 +667,16 @@ final class AppModel {
         if let selected = selectedPath, let moved = move.map(selected) { selectedPath = moved }
         sidebarFiles.newFolders = Set(sidebarFiles.newFolders.map(remap))
         if let renaming = sidebarFiles.renamingPath { sidebarFiles.renamingPath = remap(renaming) }
-        tree = tree.map { FileTreeEdit.rebased($0, to: newRoot + "/" + $0.name) }
-        recentFolders = Array(([newRoot] + recentFolders.filter { $0 != oldRoot && $0 != newRoot }).prefix(10))
-        defaults.set(recentFolders, forKey: Keys.recentFolders)
-        defaults.set(newRoot, forKey: Keys.root)
-        expanded = Set(expanded.map(remap))
+        let remappedExpanded = Set(expanded.map(remap))
+        if remappedExpanded != expanded { expanded = remappedExpanded }
         history = history.map(remap)
-        recentFiles = recentFiles.map(remap)
-        defaults.set(recentFiles, forKey: Keys.recentFiles)
+        let remappedRecent = recentFiles.map(remap)
+        if remappedRecent != recentFiles {
+            recentFiles = remappedRecent
+            defaults.set(recentFiles, forKey: Keys.recentFiles)
+        }
         tabStore.list.remap { move.map($0) }
         persistTabs()
-        watch(newRoot)
-        saveNow()
-        render(debounce: false)
-        rescan()
-        filesDidChange(structure: true)
     }
 
     /// Text that is not on disk: the open document's edits and tabs whose saves failed.

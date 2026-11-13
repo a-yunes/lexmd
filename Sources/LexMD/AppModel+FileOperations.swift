@@ -239,7 +239,8 @@ extension AppModel {
     /// Updates everything that refers to moved paths.
     func applyMove(_ move: PathMove) {
         guard let root = rootURL?.path else { return }
-        sidebarFiles.newFolders = Set(sidebarFiles.newFolders.map { move.map($0) ?? $0 })
+        let currentMoves = currentFile.map { move.map($0.path) != nil } ?? false
+        remapOpenPaths(move)
         let node = FileTreeEdit.node(at: move.from, in: tree)
         let staysVisible = node.map { $0.children != nil || FileScanner.isMarkdown(path: move.to) } ?? false
         if staysVisible, move.to.hasPrefix(root + "/") {
@@ -247,19 +248,8 @@ extension AppModel {
         } else {
             tree = FileTreeEdit.removing(move.from, from: tree, keep: sidebarFiles.newFolders)
         }
-        let remapped = Set(expanded.map { move.map($0) ?? $0 })
-        if remapped != expanded { expanded = remapped }
-        if let current = currentFile?.path, let moved = move.map(current) {
-            currentFile = URL(fileURLWithPath: moved)
-            defaults.set(moved, forKey: Keys.lastFile)
-            render(debounce: false)
-        }
-        if let selected = selectedPath, let moved = move.map(selected) { selectedPath = moved }
-        history = history.map { move.map($0) ?? $0 }
-        tabStore.list.remap { move.map($0) }
-        if let renaming = sidebarFiles.renamingPath, let moved = move.map(renaming) { sidebarFiles.renamingPath = moved }
+        if currentMoves { render(debounce: false) }
         reveal(move.to)
-        persistTabs()
         rescan()
         filesDidChange(structure: true)
     }
