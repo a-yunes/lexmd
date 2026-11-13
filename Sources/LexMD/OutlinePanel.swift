@@ -82,9 +82,10 @@ struct OutlinePanel: View {
                                 .accessibilityHidden(true)
                         }
                     }
-                    .contentShape(Rectangle())
+                    .outlineRowHitTarget()
             }
             .buttonStyle(.plain)
+            .listRowInsets(.vertical, 0)
             .id("heading-\(heading.id)")
             .help(heading.title)
             .accessibilityLabel("\(heading.title), heading level \(heading.level)")
@@ -115,9 +116,10 @@ struct OutlinePanel: View {
                     }
                     .padding(.vertical, 2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                    .outlineRowHitTarget()
                 }
                 .buttonStyle(.plain)
+                .listRowInsets(.vertical, 0)
                 .help("\(link.folder.isEmpty ? "" : link.folder + "/")\(link.name), line \(link.line)")
             }
             if outline.backlinkCount > outline.backlinks.count {
@@ -151,11 +153,22 @@ struct OutlinePanel: View {
                 }
                 .padding(.vertical, 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                .outlineRowHitTarget()
             }
             .buttonStyle(.plain)
+            .listRowInsets(.vertical, 0)
             .help("Select in the editor")
         }
+    }
+}
+
+private extension View {
+    /// Makes the row's whole height clickable. The space the list leaves between rows (removed
+    /// with `.listRowInsets(.vertical, 0)` on the row) becomes padding inside the button, so the
+    /// rows and their highlight look the same, and a click between two rows lands on one of them.
+    func outlineRowHitTarget() -> some View {
+        padding(.vertical, OutlineLayout.rowGap)
+            .contentShape(Rectangle())
     }
 }
 
@@ -203,6 +216,8 @@ enum OutlineLayout {
     static let maxWidth: CGFloat = 440
     /// The narrowest the file tree gets.
     static let sidebarMinWidth: CGFloat = 210
+    /// The space between rows' content, inside each row's hit target.
+    static let rowGap: CGFloat = 8
     /// Keyboard and VoiceOver resizing steps.
     static let widthStep: CGFloat = 20
 
