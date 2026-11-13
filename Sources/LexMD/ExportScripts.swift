@@ -2,9 +2,9 @@
 /// LexMD's content world, never in the page world where document markup lives.
 enum ExportScripts {
     /// Waits for LexMD's rendering to finish: queued diagrams and math are rendered at once with
-    /// `lexmdRenderAll()`, an optional `lexmdWhenRendered()` promise is awaited, and the content
-    /// must stop changing. With `eager`, images load immediately, every image is awaited, and
-    /// collapsed details open so printouts show everything.
+    /// `lexmdRenderAll()`, and the content must stop changing (diagram and math libraries load on
+    /// demand). With `eager`, images load immediately, every image is awaited, and collapsed
+    /// details open so printouts show everything.
     static let settle = #"""
 var content = document.getElementById('content');
 var deadline = Date.now() + limit;
@@ -14,12 +14,7 @@ if (eager) {
   content.querySelectorAll('img[loading]').forEach(function (img) { img.removeAttribute('loading'); });
   content.querySelectorAll('details').forEach(function (d) { d.open = true; });
 }
-if (typeof lexmdRenderAll === 'function') {
-  try { await lexmdRenderAll(); } catch (e) {}
-}
-if (typeof window.lexmdWhenRendered === 'function') {
-  try { await Promise.race([Promise.resolve(window.lexmdWhenRendered()), sleep(left())]); } catch (e) {}
-}
+try { lexmdRenderAll(); } catch (e) {}
 await new Promise(function (resolve) {
   var timer = null, finished = false;
   var observer = new MutationObserver(function () { clearTimeout(timer); timer = setTimeout(finish, 200); });
@@ -65,15 +60,11 @@ var content = document.getElementById('content');
 var base = document.baseURI;
 var inert = document.implementation.createHTMLDocument('');
 var XHTML = 'http://www.w3.org/1999/xhtml';
-var DROP = { script: 1, iframe: 1, frame: 1, frameset: 1, object: 1, embed: 1, applet: 1, base: 1, meta: 1, link: 1,
-  noscript: 1, template: 1, xmp: 1, noembed: 1, noframes: 1, plaintext: 1, portal: 1,
-  set: 1, animate: 1, animatemotion: 1, animatetransform: 1 };
+var DROP = /^(\#(UnsafeMarkup.elements))$/i;
 
 // Finishes any diagrams and math still queued in the preview.
-async function lexmdFinish() {
-  if (typeof lexmdRenderAll === 'function') {
-    try { await lexmdRenderAll(); } catch (e) {}
-  }
+function lexmdFinish() {
+  try { lexmdRenderAll(); } catch (e) {}
 }
 
 function lexmdClone(useSelection) {
@@ -110,7 +101,7 @@ function lexmdUnsafeURL(name, value) {
 function lexmdScrub(root) {
   Array.prototype.slice.call(root.querySelectorAll('*')).forEach(function (el) {
     var name = el.localName.toLowerCase();
-    if (DROP[name] || (name === 'button' && el.classList.contains('copy')) || el.id === 'lexmd-scroll') { el.remove(); return; }
+    if (DROP.test(name) || (name === 'button' && el.classList.contains('copy'))) { el.remove(); return; }
     if (name === 'mark' && el.classList.contains('lexmd-hit')) { el.replaceWith(inert.createTextNode(el.textContent)); return; }
     Array.prototype.slice.call(el.attributes).forEach(function (a) {
       var n = a.name.toLowerCase();
@@ -141,7 +132,7 @@ function lexmdEachURL(root, visit) {
     /// Serializes the rendered document for a standalone HTML file. Local references become
     /// numbered tokens that the app replaces with data URIs or relative paths.
     static let exportHTML = #"""
-await lexmdFinish();
+lexmdFinish();
 var holder = lexmdClone(false).holder;
 lexmdScrub(holder);
 var resources = [];
@@ -150,7 +141,7 @@ lexmdEachURL(holder, function (el, name, raw, abs) {
   el.setAttribute(name, nonce + resources.length + ';');
   resources.push({ url: abs, image: name === 'src' && el.localName === 'img' });
 });
-var css = Array.prototype.map.call(document.querySelectorAll('head style:not(#lexmd-katex)'), function (s) { return s.textContent; }).join('\n');
+var css = Array.prototype.map.call(document.querySelectorAll('head style:not(#lexmd-katex):not(#lexmd-overlay)'), function (s) { return s.textContent; }).join('\n');
 // KaTeX's stylesheet is only needed with math, and only the font families the math uses.
 var katexStyle = document.getElementById('lexmd-katex');
 var fonts = new Set();
@@ -169,7 +160,7 @@ return {
     /// Captures the selection or the whole document as styled HTML (with inline styles that
     /// survive pasting into Mail, Pages, Notes, and web editors), HTML for RTF, and plain text.
     static let copy = #"""
-await lexmdFinish();
+lexmdFinish();
 var picked = lexmdClone(useSelection);
 var holder = picked.holder;
 lexmdScrub(holder);

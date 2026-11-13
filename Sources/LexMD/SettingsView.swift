@@ -45,7 +45,7 @@ struct SettingsView: View {
 
     var body: some View {
         let selection = Binding(
-            get: { model.settingsTab.resolved(showsSourceControl: model.showsGitCommands) },
+            get: { model.settingsTab.resolved(showsSourceControl: model.git.isActive) },
             set: { model.settingsTab = $0 }
         )
         TabView(selection: selection) {
@@ -58,7 +58,7 @@ struct SettingsView: View {
             Tab("Preview", systemImage: "doc.richtext", value: SettingsTab.preview) {
                 PreviewSettings()
             }
-            if model.showsGitCommands {
+            if model.git.isActive {
                 Tab("Source Control", systemImage: "arrow.triangle.branch", value: SettingsTab.sourceControl) {
                     SourceControlSettings()
                 }
@@ -210,7 +210,7 @@ private struct ShortcutSettings: View {
 
     var body: some View {
         let sections = ShortcutAction.sections(
-            matching: query, includingSourceControl: model.showsGitCommands, shortcut: model.shortcut(for:)
+            matching: query, includingSourceControl: model.git.isActive, shortcut: model.shortcut(for:)
         )
         VStack(spacing: 0) {
             SettingsSearchField(text: $query, prompt: "Search commands and shortcuts")

@@ -47,6 +47,8 @@ final class EditorController: NSObject, NSTextViewDelegate {
     private var isSettlingResize = false
     /// Set while code scrolls to a place the preview reveals by itself, so `onScroll` stays quiet.
     var isScrollingQuietly = false
+    /// An action waiting for the editor to be shown; see `whenVisible(_:)`.
+    private var pendingWhileHidden: (() -> Void)?
     /// Returns true when it handled Escape.
     var onCancel: (() -> Bool)?
     /// Runs first for every key command; returns true when it handled it (link completion).
@@ -86,7 +88,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
     }
 
     override init() {
-        scrollView = NSScrollView()
+        scrollView = EditorScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
@@ -130,6 +132,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         textView.setAccessibilityIdentifier("editor")
 
         scrollView.documentView = textView
+        (scrollView as? EditorScrollView)?.onUnhide = { [weak self] in self?.editorWasUnhidden() }
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(
             self, selector: #selector(boundsDidChange(_:)),
@@ -183,11 +186,6 @@ final class EditorController: NSObject, NSTextViewDelegate {
         scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
-    func moveCursorToEnd() {
-        let length = (textView.string as NSString).length
-        textView.setSelectedRange(NSRange(location: length, length: 0))
-        textView.scrollRangeToVisible(NSRange(location: length, length: 0))
-    }
 
     func focus() {
         textView.window?.makeFirstResponder(textView)
@@ -253,29 +251,6 @@ final class EditorController: NSObject, NSTextViewDelegate {
     }
 
     /// Centers a range in the editor, optionally selecting it and flashing the find indicator.
-    func reveal(_ range: NSRange, indicator: Bool, select: Bool) {
-        let length = (textView.string as NSString).length
-        guard range.location <= length else { return }
-        let clamped = NSRange(location: range.location, length: min(range.length, length - range.location))
-        if select { textView.setSelectedRange(clamped) }
-        textView.scrollRangeToVisible(clamped)
-        if let window = textView.window {
-            let screenRect = textView.firstRect(forCharacterRange: clamped, actualRange: nil)
-            if screenRect != .zero {
-                let rect = textView.convert(window.convertFromScreen(screenRect), from: nil)
-                let clip = scrollView.contentView
-                let minY = -scrollView.contentInsets.top
-                let maxY = max(minY, textView.frame.height - clip.bounds.height)
-                let targetY = rect.midY - clip.bounds.height / 2
-                clip.scroll(to: NSPoint(x: 0, y: min(max(targetY, minY), maxY)))
-                scrollView.reflectScrolledClipView(clip)
-            }
-        }
-        if indicator, !scrollView.isHiddenOrHasHiddenAncestor {
-            textView.showFindIndicator(for: clamped)
-        }
-    }
-
     func wrapSelection(_ prefix: String, _ suffix: String) {
         guard isFocused else { return }
         let range = textView.selectedRange()
@@ -461,5 +436,186 @@ final class EditorController: NSObject, NSTextViewDelegate {
         pendingEdit = nil
         needsFullHighlight = false
         textView.typingAttributes = MarkdownHighlighter.baseAttributes(size: fontSize)
+    }
+}
+
+// MARK: - Programmatic edits
+
+extension EditorController {
+    /// Replaces every range in one undoable step, with one change notification, so autosave,
+    /// the preview, and incremental highlighting each see a single edit, and so does undoing it.
+    /// Ranges must not overlap. Every programmatic text edit (paste, tables, find and replace,
+    /// link updates) goes through here.
+    @discardableResult
+    func replace(_ edits: [TextEdit], actionName: String) -> Bool {
+        guard !edits.isEmpty, !textView.hasMarkedText(), let storage = textView.textStorage else { return false }
+        let sorted = edits.sorted { $0.range.location < $1.range.location }
+        var end = 0
+        for edit in sorted {
+            guard edit.range.location >= end, NSMaxRange(edit.range) <= storage.length else { return false }
+            end = NSMaxRange(edit.range)
+        }
+        textView.breakUndoCoalescing()
+        guard textView.shouldChangeText(
+            inRanges: sorted.map { NSValue(range: $0.range) }, replacementStrings: sorted.map(\.replacement)
+        ) else { return false }
+        storage.beginEditing()
+        for edit in sorted.reversed() {
+            storage.replaceCharacters(in: edit.range, with: edit.replacement)
+        }
+        storage.endEditing()
+        textView.didChangeText()
+        textView.undoManager?.setActionName(actionName)
+        registerTextChangeOnUndo()
+        textView.breakUndoCoalescing()
+        return true
+    }
+
+    /// Undoing or redoing edits made through the text storage does not report the change to
+    /// the delegate, so the model would keep (and autosave) the text from before the undo. This
+    /// reports it once the undo or redo has run.
+    private func registerTextChangeOnUndo() {
+        textView.undoManager?.registerUndo(withTarget: self) { editor in
+            MainActor.assumeIsolated {
+                editor.registerTextChangeOnUndo()
+                DispatchQueue.main.async {
+                    editor.textDidChange(Notification(name: NSText.didChangeNotification, object: editor.textView))
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Scrolling
+
+/// The editor's scroll view, which tells the editor when a view mode shows it again.
+final class EditorScrollView: NSScrollView {
+    var onUnhide: (() -> Void)?
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        onUnhide?()
+    }
+}
+
+extension EditorController {
+    /// Scrolls so the visible area starts at `y`, kept within the document.
+    func scroll(toY y: CGFloat) {
+        let clip = scrollView.contentView
+        let target = Self.clampedOffset(
+            y, visibleHeight: clip.bounds.height, documentHeight: textView.frame.height, topInset: scrollView.contentInsets.top
+        )
+        guard abs(clip.bounds.origin.y - target) > 0.5 else { return }
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: target))
+        scrollView.reflectScrolledClipView(clip)
+    }
+
+    /// A scroll offset kept between the top inset and the end of the document.
+    static func clampedOffset(_ y: CGFloat, visibleHeight: CGFloat, documentHeight: CGFloat, topInset: CGFloat) -> CGFloat {
+        let minY = -topInset
+        let maxY = max(minY, documentHeight - visibleHeight)
+        return min(max(y.rounded(), minY), maxY)
+    }
+
+    /// Selects a range if asked and scrolls its line to the middle of the editor.
+    func reveal(_ range: NSRange, indicator: Bool, select: Bool) {
+        let length = (textView.string as NSString).length
+        guard range.location <= length else { return }
+        let clamped = NSRange(location: range.location, length: min(range.length, length - range.location))
+        if select { textView.setSelectedRange(clamped) }
+        if textView.window != nil, let line = lineFrame(at: clamped.location) {
+            scroll(toY: line.midY - scrollView.contentView.bounds.height / 2)
+        } else {
+            textView.scrollRangeToVisible(clamped)
+        }
+        if indicator, !scrollView.isHiddenOrHasHiddenAncestor {
+            textView.showFindIndicator(for: clamped)
+        }
+    }
+
+    /// Moves the caret to a location and scrolls its line to the top of the editor. The preview is
+    /// not scrolled along, since callers reveal the same place in it precisely.
+    func revealAtTop(_ location: Int) {
+        let length = (textView.string as NSString).length
+        let range = NSRange(location: min(max(location, 0), length), length: 0)
+        isScrollingQuietly = true
+        defer { isScrollingQuietly = false }
+        textView.setSelectedRange(range)
+        guard textView.window != nil, let line = lineFrame(at: range.location) else {
+            textView.scrollRangeToVisible(range)
+            return
+        }
+        scroll(toY: line.minY - scrollView.contentInsets.top - 12)
+    }
+
+    /// The line at a location in text view coordinates. The text before it is laid out first:
+    /// estimated heights would put the line too high or too low. (The text view's `firstRect`
+    /// is no help here: it is empty for text outside the visible area.)
+    func lineFrame(at location: Int) -> CGRect? {
+        guard let layout = textView.textLayoutManager, let content = layout.textContentManager else { return nil }
+        let start = layout.documentRange.location
+        guard let target = content.location(start, offsetBy: location),
+              let before = NSTextRange(location: start, end: target) else { return nil }
+        layout.ensureLayout(for: before)
+        guard let fragment = layout.textLayoutFragment(for: target) else { return nil }
+        let frame = fragment.layoutFragmentFrame
+        let line = fragment.textLineFragment(for: target, isUpstreamAffinity: false)?.typographicBounds
+            ?? CGRect(x: 0, y: 0, width: frame.width, height: frame.height)
+        let origin = textView.textContainerOrigin
+        return CGRect(x: origin.x + frame.minX + line.minX, y: origin.y + frame.minY + line.minY, width: line.width, height: line.height)
+    }
+
+    /// The text location at the top of the visible editor area.
+    /// Asks the layout manager rather than `characterIndexForInsertion`, which answers with the end
+    /// of the text while the visible part is not laid out yet, as right after a document loads.
+    func topVisibleLocation() -> Int {
+        let bounds = scrollView.contentView.bounds
+        let point = NSPoint(x: textView.textContainerInset.width + 4, y: bounds.minY + scrollView.contentInsets.top + 24)
+        guard let layout = textView.textLayoutManager, let content = layout.textContentManager else {
+            return textView.characterIndexForInsertion(at: point)
+        }
+        let origin = textView.textContainerOrigin
+        let inContainer = CGPoint(x: point.x - origin.x, y: max(0, point.y - origin.y))
+        layout.ensureLayout(for: CGRect(x: 0, y: inContainer.y, width: 1, height: 1))
+        guard let fragment = layout.textLayoutFragment(for: inContainer) else {
+            return textView.characterIndexForInsertion(at: point)
+        }
+        return content.offset(from: layout.documentRange.location, to: fragment.rangeInElement.location)
+    }
+
+    /// Puts back a remembered caret, selection, and scroll position.
+    func restore(selection: NSRange, origin: CGPoint?) {
+        let length = (textView.string as NSString).length
+        let location = min(selection.location, length)
+        textView.setSelectedRange(NSRange(location: location, length: min(selection.length, length - location)))
+        let clip = scrollView.contentView
+        guard let origin else { return }
+        if origin.y > clip.bounds.height, let layout = textView.textLayoutManager {
+            layout.ensureLayout(for: layout.documentRange)
+        }
+        let target = clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin
+        clip.scroll(to: target)
+        scrollView.reflectScrolledClipView(clip)
+    }
+
+    /// Runs `action` now if the editor is on screen, or once a view mode shows it again and it
+    /// has its size (Read hides it). The latest action waiting wins.
+    func whenVisible(_ action: @escaping () -> Void) {
+        if scrollView.window != nil, !scrollView.isHiddenOrHasHiddenAncestor {
+            pendingWhileHidden = nil
+            action()
+        } else {
+            pendingWhileHidden = action
+        }
+    }
+
+    /// The split view sizes the editor right after unhiding it, so the action runs a turn later.
+    func editorWasUnhidden() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let action = self.pendingWhileHidden,
+                  self.scrollView.window != nil, !self.scrollView.isHiddenOrHasHiddenAncestor else { return }
+            self.pendingWhileHidden = nil
+            action()
+        }
     }
 }

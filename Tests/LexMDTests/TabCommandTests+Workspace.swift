@@ -35,7 +35,7 @@ extension TabCommandTests {
         // open the row in the active tab, or Open in New Tab finds it already showing.
         let previousEvent = AppModel.currentEvent
         AppModel.currentEvent = { click }
-        model.selectedPath = path("b.md")
+        model.sidebarSelected(path("b.md"))
         AppModel.currentEvent = previousEvent
         #expect(model.currentFile?.path == path("a.md"))
         #expect(model.selectedPath == path("a.md"))
@@ -55,10 +55,10 @@ extension TabCommandTests {
         ))
         try folder.write("c.md", "# C\n")
         AppModel.currentEvent = { commandClick }
-        model.selectedPath = path("c.md")
+        model.sidebarSelected(path("c.md"))
         AppModel.currentEvent = previousEvent
         #expect(model.tabStore.list.tabs.map(\.path) == [path("a.md"), path("b.md"), path("c.md")])
-        model.selectedPath = path("a.md")
+        model.sidebarSelected(path("a.md"))
         #expect(model.tabStore.list.count == 3)
         #expect(model.currentFile?.path == path("a.md"))
 
@@ -127,6 +127,114 @@ extension TabCommandTests {
         #expect(try String(contentsOfFile: trashRoot + "/notes/a.md", encoding: .utf8) == "# A typed during the move\n")
         #expect(try String(contentsOfFile: trashRoot + "/notes/b.md", encoding: .utf8) == "# B unsaved\n")
         #expect(model.tabStore.list.isEmpty)
+        model.closeTabsForProjectChange()
+    }
+
+    /// Back and Forward retrace the documents opened in the tab, open them in the active tab even
+    /// when another tab shows them, and don't record their own visits; opening a document after
+    /// going back drops the documents ahead.
+    @Test func backAndForwardRetraceTheTabsDocuments() async throws {
+        let folder = try TestFolder()
+        for name in ["a", "b", "c", "d"] { try folder.write("\(name).md", "# \(name)\n") }
+        let model = AppModel.shared
+        model.open(folder.url)
+        try await waitUntil { model.tree.count == 4 }
+        let path = { FileScanner.canonicalPath(folder.url.appendingPathComponent($0).path) }
+        let current = { model.currentFile?.path }
+        model.open(URL(fileURLWithPath: path("a.md")))
+        model.open(URL(fileURLWithPath: path("b.md")))
+        model.open(URL(fileURLWithPath: path("c.md")))
+        #expect(current() == path("c.md") && model.canGoBack && !model.canGoForward)
+
+        model.goBack()
+        #expect(current() == path("b.md") && model.selectedPath == path("b.md"))
+        model.goBack()
+        #expect(current() == path("a.md") && !model.canGoBack && model.canGoForward)
+        model.goForward()
+        #expect(current() == path("b.md") && model.canGoBack && model.canGoForward)
+
+        // Opening a document after going back drops c from the documents ahead.
+        model.open(URL(fileURLWithPath: path("d.md")))
+        #expect(!model.canGoForward)
+        model.goBack()
+        #expect(current() == path("b.md"))
+
+        // Back stays in the active tab even though another tab shows a.md.
+        let tabs = model.tabStore.list.tabs.count
+        model.openInNewTab(path("a.md"))
+        let aTab = model.tabStore.list.activeID
+        model.selectTab(try #require(model.tabStore.list.tabs.first { $0.id != aTab }?.id))
+        #expect(current() == path("b.md"))
+        model.goBack()
+        #expect(current() == path("a.md"))
+        #expect(model.tabStore.list.activeID != aTab, "the active tab loaded it")
+        #expect(model.tabStore.list.tabs.count == tabs + 1)
+        model.closeTabsForProjectChange()
+    }
+
+    /// Renaming the open document moves it in every list that remembers it, recent files included,
+    /// as moving the whole project folder does.
+    @Test func renamingKeepsTheDocumentInRecentFiles() async throws {
+        let folder = try TestFolder()
+        try folder.write("a.md", "# A\n")
+        try folder.write("b.md", "# B\n")
+        let model = AppModel.shared
+        model.open(folder.url)
+        try await waitUntil { model.tree.count == 2 }
+        let path = { FileScanner.canonicalPath(folder.url.appendingPathComponent($0).path) }
+        let a = path("a.md")
+        model.open(URL(fileURLWithPath: a))
+        model.open(URL(fileURLWithPath: path("b.md")))
+        #expect(model.recentFiles.contains(a))
+
+        model.beginRename(URL(fileURLWithPath: a))
+        model.commitRename(a, to: "renamed")
+        let renamed = path("renamed.md")
+        try await waitUntil { FileManager.default.fileExists(atPath: renamed) }
+        #expect(model.recentFiles.contains(renamed))
+        #expect(!model.recentFiles.contains(a))
+        model.closeTabsForProjectChange()
+    }
+
+    /// Unsaved text that can't be written into the Trash with its document is offered for saving
+    /// elsewhere instead of being dropped with the tab.
+    @Test func trashOffersToKeepTextItCouldNotMove() async throws {
+        let folder = try TestFolder()
+        let trash = try TestFolder()
+        try folder.write("a.md", "# A\n")
+        try folder.write("b.md", "# B\n")
+        let model = AppModel.shared
+        model.open(folder.url)
+        try await waitUntil { !model.tree.isEmpty }
+        let path = { FileScanner.canonicalPath(folder.url.appendingPathComponent($0).path) }
+        model.open(URL(fileURLWithPath: path("a.md")))
+        model.openInNewTab(path("b.md"))
+        let aTab = try #require(model.tabStore.list.tab(withPath: path("a.md")))
+        model.tabStore.list.update(aTab.id) { $0.state.unsavedText = "# A unsaved\n" }
+
+        // The item lands in the Trash, but the reported location can't be written to.
+        let trashRoot = FileScanner.canonicalPath(trash.url.path)
+        model.sidebarFiles.recycler = { urls in
+            var result: [URL: URL] = [:]
+            for url in urls {
+                try FileManager.default.moveItem(at: url, to: URL(fileURLWithPath: trashRoot).appendingPathComponent(url.lastPathComponent))
+                result[url] = URL(fileURLWithPath: trashRoot + "/missing/" + url.lastPathComponent)
+            }
+            return result
+        }
+        var offered: [(path: String, text: String)] = []
+        let keep = AppModel.keepUnsavedElsewhere
+        AppModel.keepUnsavedElsewhere = { documents, _, finish in offered = documents; finish() }
+        defer {
+            model.sidebarFiles.recycler = FileOperations.systemRecycler
+            AppModel.keepUnsavedElsewhere = keep
+        }
+
+        let a = path("a.md")
+        model.moveToTrash(URL(fileURLWithPath: a))
+        try await waitUntil { model.tabStore.list.tab(withPath: a) == nil }
+        #expect(offered.map(\.path) == [a])
+        #expect(offered.first?.text == "# A unsaved\n")
         model.closeTabsForProjectChange()
     }
 

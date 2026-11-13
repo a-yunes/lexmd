@@ -82,7 +82,7 @@ extension AppModel {
             }
             ensureSidebarVisible()
             reveal(file.path)
-            selectedPath = file.path
+            showDocument(file.path)
             sidebarFiles.renameIsNewDocument = true
             sidebarFiles.renamingPath = file.path
             rescanSoon()
@@ -158,7 +158,7 @@ extension AppModel {
     private func startWritingNewDocument() {
         guard currentFile != nil else { return }
         if viewMode == .read { setViewMode(.split) }
-        editor.focus()
+        editor.whenVisible { [weak self] in self?.editor.focus() }
     }
 
     // MARK: Move
@@ -239,7 +239,8 @@ extension AppModel {
     /// Updates everything that refers to moved paths.
     func applyMove(_ move: PathMove) {
         guard let root = rootURL?.path else { return }
-        sidebarFiles.newFolders = Set(sidebarFiles.newFolders.map { move.map($0) ?? $0 })
+        let currentMoves = currentFile.map { move.map($0.path) != nil } ?? false
+        remapOpenPaths(move)
         let node = FileTreeEdit.node(at: move.from, in: tree)
         let staysVisible = node.map { $0.children != nil || FileScanner.isMarkdown(path: move.to) } ?? false
         if staysVisible, move.to.hasPrefix(root + "/") {
@@ -247,19 +248,8 @@ extension AppModel {
         } else {
             tree = FileTreeEdit.removing(move.from, from: tree, keep: sidebarFiles.newFolders)
         }
-        let remapped = Set(expanded.map { move.map($0) ?? $0 })
-        if remapped != expanded { expanded = remapped }
-        if let current = currentFile?.path, let moved = move.map(current) {
-            currentFile = URL(fileURLWithPath: moved)
-            defaults.set(moved, forKey: Keys.lastFile)
-            render(debounce: false)
-        }
-        if let selected = selectedPath, let moved = move.map(selected) { selectedPath = moved }
-        history = history.map { move.map($0) ?? $0 }
-        tabStore.list.remap { move.map($0) }
-        if let renaming = sidebarFiles.renamingPath, let moved = move.map(renaming) { sidebarFiles.renamingPath = moved }
+        if currentMoves { render(debounce: false) }
         reveal(move.to)
-        persistTabs()
         rescan()
         filesDidChange(structure: true)
     }
@@ -351,13 +341,10 @@ extension AppModel {
         history = history.filter { !inside($0) }
         historyIndex = min(historyIndex, history.count - 1)
         // Text that never reached the disk (typed while the item was moving, or that a tab could
-        // not save) goes with its document to the Trash rather than being dropped with the tab.
-        var unsaved = tabStore.list.tabs.compactMap { tab in tab.state.unsavedText.map { (tab.path, $0) } }
-        if let current = currentFile?.path, text != savedText { unsaved.append((current, text)) }
-        for (document, contents) in unsaved where inside(document) {
-            guard let trashed, let moved = PathMove(from: path, to: trashed.path).map(document) else { continue }
-            try? contents.write(toFile: moved, atomically: false, encoding: .utf8)
-        }
+        // not save) goes with its document to the Trash rather than being dropped with the tab;
+        // what can't be written there is offered for saving elsewhere once the tabs are closed.
+        let unsaved = unsavedDocuments().filter { inside($0.path) }
+        let unwritten = trashed.map { writeUnsaved(unsaved, through: PathMove(from: path, to: $0.path)) } ?? unsaved
         if let current = currentFile?.path, inside(current) {
             // Nothing may write its text back to the old place.
             savedText = text
@@ -365,6 +352,10 @@ extension AppModel {
             if tabStore.list.activeID != nil { showActiveTab() } else { closeDocument() }
         } else {
             _ = tabStore.list.removeAll(where: inside)
+        }
+        if !unwritten.isEmpty {
+            let name = (path as NSString).lastPathComponent
+            Self.keepUnsavedElsewhere(unwritten, { Self.trashedItemAlert(name: name, documents: unwritten) }) {}
         }
         persistTabs()
         rescan()
@@ -459,7 +450,7 @@ extension AppModel {
             if file.path == current {
                 let before = text
                 let edits = LinkRewriter.edits(in: text, oldPath: oldPath, newPath: file.path, context: context)
-                if editor.applyEdits(edits, actionName: "Update Links") {
+                if editor.replace(edits, actionName: "Update Links") {
                     record.openDocument = RewrittenFile(path: file.path, before: before, after: editor.textView.string)
                 }
             } else if let tab = tabStore.list.tabs.first(where: { $0.path == file.path && $0.state.unsavedText != nil }),
@@ -498,7 +489,7 @@ extension AppModel {
             let oldPath = context.oldLocation(of: path)
             if path == currentFile?.path {
                 let edits = LinkRewriter.edits(in: text, oldPath: oldPath, newPath: path, context: context)
-                editor.applyEdits(edits, actionName: "Update Links")
+                editor.replace(edits, actionName: "Update Links")
             } else if let tab = tabStore.list.tab(withPath: path), let unsaved = tab.state.unsavedText {
                 let edits = LinkRewriter.edits(in: unsaved, oldPath: oldPath, newPath: path, context: context)
                 if !edits.isEmpty { tabStore.list.update(tab.id) { $0.state.unsavedText = TextEdit.apply(edits, to: unsaved) } }

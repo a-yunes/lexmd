@@ -22,6 +22,9 @@ enum PreviewTemplate {
 <style>
 """# + "\n" + PreviewStyle.page + "\n" + #"""
 </style>
+<style id="lexmd-overlay">
+"""# + "\n" + PreviewStyle.overlayScrolling + "\n" + #"""
+</style>
 </head>
 <body>
 <article id="content"></article>

@@ -60,10 +60,9 @@ final class AppModel {
         }
     }
 
-    /// Path of the file highlighted in the sidebar.
-    var selectedPath: String? {
-        didSet { selectionChanged(from: oldValue) }
-    }
+    /// Path of the file highlighted in the sidebar. Setting it only moves the highlight;
+    /// `showDocument(_:)` opens documents and `sidebarSelected(_:)` handles clicks on rows.
+    var selectedPath: String?
 
     // Document
     var currentFile: URL?
@@ -113,7 +112,6 @@ final class AppModel {
     private(set) var recentFiles: [String] = []
     var history: [String] = []
     var historyIndex = -1
-    @ObservationIgnored var isNavigatingHistory = false
 
     var compactFolders = true {
         didSet {
@@ -159,7 +157,7 @@ final class AppModel {
     var showGitStatus = true {
         didSet {
             defaults.set(showGitStatus, forKey: Keys.showGitStatus)
-            gitSettingChanged()
+            git.setStatusEnabled(showGitStatus)
         }
     }
 
@@ -447,7 +445,7 @@ final class AppModel {
             let last = FileScanner.canonicalPath(stored)
             if last.hasPrefix(path + "/"), FileManager.default.fileExists(atPath: last) {
                 reveal(last)
-                selectedPath = last
+                showDocument(last)
             }
         }
     }
@@ -472,7 +470,9 @@ final class AppModel {
     }
 
     /// Opens a folder (as the sidebar root) or a Markdown file.
-    func open(_ url: URL) {
+    /// Opens a project folder, or a document (with its folder when it is outside the project).
+    /// `placement` and `recordsHistory` apply to a document; see `showDocument(_:placement:recordsHistory:)`.
+    func open(_ url: URL, placement: DocumentPlacement = .reuseTab, recordsHistory: Bool = true) {
         let path = FileScanner.canonicalPath(url.path)
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { return }
@@ -480,16 +480,16 @@ final class AppModel {
         let inside = rootURL.map { path.hasPrefix($0.path + "/") } ?? false
         let newRoot = isDirectory ? path : (inside ? nil : (path as NSString).deletingLastPathComponent)
         guard let newRoot, let root = rootURL?.path, newRoot != root else {
-            finishOpening(path, isDirectory: isDirectory)
+            finishOpening(path, isDirectory: isDirectory, placement: placement, recordsHistory: recordsHistory)
             return
         }
         // Opening another project closes these tabs: text that can't be saved is never dropped.
         settleUnsavedText(before: "open another project") { [weak self] proceed in
-            if proceed { self?.finishOpening(path, isDirectory: isDirectory) }
+            if proceed { self?.finishOpening(path, isDirectory: isDirectory, placement: placement, recordsHistory: recordsHistory) }
         }
     }
 
-    private func finishOpening(_ path: String, isDirectory: Bool) {
+    private func finishOpening(_ path: String, isDirectory: Bool, placement: DocumentPlacement, recordsHistory: Bool) {
         if isDirectory {
             setRoot(URL(fileURLWithPath: path, isDirectory: true))
             if tabStore.list.isEmpty { restoreTabs() }
@@ -501,7 +501,7 @@ final class AppModel {
             setRoot(URL(fileURLWithPath: path).deletingLastPathComponent())
         }
         reveal(path)
-        selectedPath = path
+        showDocument(path, placement: placement, recordsHistory: recordsHistory)
     }
 
     private func setRoot(_ url: URL) {
@@ -543,7 +543,6 @@ final class AppModel {
         if !missing.isEmpty { expanded.formUnion(missing) }
     }
 
-    func rescanSoon() { scheduleRescan() }
 
     func rescan() {
         guard let root = rootURL else { return }
@@ -572,7 +571,8 @@ final class AppModel {
         }
     }
 
-    private func scheduleRescan() {
+    /// Rescans once a burst of changes has passed.
+    func rescanSoon() {
         rescanTask?.cancel()
         rescanTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 250_000_000)
@@ -589,7 +589,7 @@ final class AppModel {
         }
         if eventsTouchOpenDocuments(events) { followMovedDocuments() }
         linksHandleFileEvents(events, root: root)
-        gitFileEvents(events)
+        git.fileEvents(events)
         var structural = false
         var currentChanged = false
         let current = currentFile?.path
@@ -605,7 +605,7 @@ final class AppModel {
                 structural = true
             }
         }
-        if structural { scheduleRescan() }
+        if structural { rescanSoon() }
         if currentChanged { reloadFromDiskIfNeeded() }
     }
 
@@ -624,12 +624,7 @@ final class AppModel {
             followProjectMove(to: newRoot)
         case .trashed(let trashed):
             // Keep unsaved changes with the folder in the Trash, so Put Back brings them along.
-            let move = PathMove(from: root, to: trashed)
-            let unwritten = unsavedDocuments().filter { document in
-                guard let target = move.map(document.path) else { return true }
-                return (try? document.text.write(toFile: target, atomically: false, encoding: .utf8)) == nil
-            }
-            closeProjectKeeping(unwritten, name: name)
+            closeProjectKeeping(writeUnsaved(unsavedDocuments(), through: PathMove(from: root, to: trashed)), name: name)
         case .removed:
             var isDirectory: ObjCBool = false
             if FileManager.default.fileExists(atPath: root, isDirectory: &isDirectory), isDirectory.boolValue {
@@ -647,9 +642,24 @@ final class AppModel {
     /// autosave writes to the moved files), tabs, history, and saved settings.
     func followProjectMove(to newRoot: String) {
         guard let oldRoot = rootURL?.path, newRoot != oldRoot else { return }
-        let move = PathMove(from: oldRoot, to: newRoot)
-        let remap = { (path: String) in move.map(path) ?? path }
         rootURL = URL(fileURLWithPath: newRoot, isDirectory: true)
+        remapOpenPaths(PathMove(from: oldRoot, to: newRoot))
+        tree = tree.map { FileTreeEdit.rebased($0, to: newRoot + "/" + $0.name) }
+        recentFolders = Array(([newRoot] + recentFolders.filter { $0 != oldRoot && $0 != newRoot }).prefix(10))
+        defaults.set(recentFolders, forKey: Keys.recentFolders)
+        defaults.set(newRoot, forKey: Keys.root)
+        watch(newRoot)
+        saveNow()
+        render(debounce: false)
+        rescan()
+        filesDidChange(structure: true)
+    }
+
+    /// Moves every remembered path inside `move` along with it: the open document, the sidebar's
+    /// highlight, new folders, the rename field, expanded folders, history, recent files and tabs.
+    /// A moved project folder and an item moved inside the project both come through here.
+    func remapOpenPaths(_ move: PathMove) {
+        let remap = { (path: String) in move.map(path) ?? path }
         if let current = currentFile?.path, let moved = move.map(current) {
             currentFile = URL(fileURLWithPath: moved)
             defaults.set(moved, forKey: Keys.lastFile)
@@ -657,21 +667,16 @@ final class AppModel {
         if let selected = selectedPath, let moved = move.map(selected) { selectedPath = moved }
         sidebarFiles.newFolders = Set(sidebarFiles.newFolders.map(remap))
         if let renaming = sidebarFiles.renamingPath { sidebarFiles.renamingPath = remap(renaming) }
-        tree = tree.map { FileTreeEdit.rebased($0, to: newRoot + "/" + $0.name) }
-        recentFolders = Array(([newRoot] + recentFolders.filter { $0 != oldRoot && $0 != newRoot }).prefix(10))
-        defaults.set(recentFolders, forKey: Keys.recentFolders)
-        defaults.set(newRoot, forKey: Keys.root)
-        expanded = Set(expanded.map(remap))
+        let remappedExpanded = Set(expanded.map(remap))
+        if remappedExpanded != expanded { expanded = remappedExpanded }
         history = history.map(remap)
-        recentFiles = recentFiles.map(remap)
-        defaults.set(recentFiles, forKey: Keys.recentFiles)
+        let remappedRecent = recentFiles.map(remap)
+        if remappedRecent != recentFiles {
+            recentFiles = remappedRecent
+            defaults.set(recentFiles, forKey: Keys.recentFiles)
+        }
         tabStore.list.remap { move.map($0) }
         persistTabs()
-        watch(newRoot)
-        saveNow()
-        render(debounce: false)
-        rescan()
-        filesDidChange(structure: true)
     }
 
     /// Text that is not on disk: the open document's edits and tabs whose saves failed.
@@ -684,17 +689,41 @@ final class AppModel {
         return documents
     }
 
+    /// Writes each document's text to where `move` took its file, and returns the documents it
+    /// couldn't write, so the caller can keep them some other way.
+    func writeUnsaved(_ documents: [(path: String, text: String)], through move: PathMove) -> [(path: String, text: String)] {
+        documents.filter { document in
+            guard let target = move.map(document.path) else { return true }
+            return (try? document.text.write(toFile: target, atomically: false, encoding: .utf8)) == nil
+        }
+    }
+
     /// Closes a project whose folder is gone, first offering to save `documents` elsewhere.
     private func closeProjectKeeping(_ documents: [(path: String, text: String)], name: String) {
         guard !documents.isEmpty else { closeProject(); return }
-        present(Self.missingProjectAlert(name: name, documents: documents)) { [weak self] response in
+        Self.keepUnsavedElsewhere(documents, { Self.missingProjectAlert(name: name, documents: documents) }) { [weak self] in
+            self?.closeProject()
+        }
+    }
+
+    /// Offers to save text that lost its file in another folder, then runs `finish`. There is no
+    /// Cancel: the file is already gone, so the text is either kept elsewhere or discarded.
+    /// Replaced in tests.
+    static var keepUnsavedElsewhere: (
+        _ documents: [(path: String, text: String)], _ alert: @escaping () -> NSAlert, _ finish: @escaping () -> Void
+    ) -> Void = { documents, alert, finish in
+        AppModel.shared.askToKeep(documents, alert: alert, then: finish)
+    }
+
+    private func askToKeep(_ documents: [(path: String, text: String)], alert: @escaping () -> NSAlert, then finish: @escaping () -> Void) {
+        present(alert()) { [weak self] response in
             guard let self else { return }
-            guard response == .alertFirstButtonReturn else { self.closeProject(); return }
+            guard response == .alertFirstButtonReturn else { finish(); return }
             let panel = Self.unsavedDocumentsFolderPanel()
             self.present(panel) { [weak self] response in
                 guard let self else { return }
                 guard response == .OK, let folder = panel.url else {
-                    self.closeProjectKeeping(documents, name: name)
+                    self.askToKeep(documents, alert: alert, then: finish)
                     return
                 }
                 do {
@@ -703,10 +732,10 @@ final class AppModel {
                         let target = FileOperations.uniqueURL(in: folder, base: file.deletingPathExtension, extension: file.pathExtension)
                         try document.text.write(to: target, atomically: true, encoding: .utf8)
                     }
-                    self.closeProject()
+                    finish()
                 } catch {
                     // Ask again once the error has been read, so the text is never dropped.
-                    self.present(NSAlert(error: error)) { [weak self] _ in self?.closeProjectKeeping(documents, name: name) }
+                    self.present(NSAlert(error: error)) { [weak self] _ in self?.askToKeep(documents, alert: alert, then: finish) }
                 }
             }
         }
@@ -722,6 +751,20 @@ final class AppModel {
             ? "Changes to “\((documents[0].path as NSString).lastPathComponent)”"
             : "Changes to \(documents.count) documents"
         alert.informativeText = "\(what) couldn’t be saved because the project folder is gone. Save them in another folder to keep them."
+        alert.addButton(withTitle: "Save to Folder…")
+        alert.addDestructiveButton("Discard Changes")
+        return alert
+    }
+
+    /// An item went to the Trash, but some of its documents' unsaved text couldn't go with it.
+    static func trashedItemAlert(name: String, documents: [(path: String, text: String)]) -> NSAlert {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "“\(name)” is in the Trash"
+        let what = documents.count == 1
+            ? "Changes to “\((documents[0].path as NSString).lastPathComponent)”"
+            : "Changes to \(documents.count) documents"
+        alert.informativeText = "\(what) couldn’t be saved with it. Save them in another folder to keep them."
         alert.addButton(withTitle: "Save to Folder…")
         alert.addDestructiveButton("Discard Changes")
         return alert
@@ -798,25 +841,9 @@ final class AppModel {
 
     // MARK: - Document lifecycle
 
-    private func selectionChanged(from old: String?) {
-        guard selectedPath != old else { return }
-        guard let path = selectedPath else {
-            // Keep the open document highlighted when the list clears its selection.
-            if let current = currentFile?.path { selectedPath = current }
-            return
-        }
-        guard path != currentFile?.path else { return }
-        if Self.isContextClick(Self.currentEvent()) {
-            // A secondary click shows the row's menu. Opening the row here would replace the
-            // document in the active tab before a command such as Open in New Tab runs.
-            selectedPath = currentFile?.path
-            return
-        }
-        if routeSelectionToTabs(path) { return }
-        load(URL(fileURLWithPath: path))
-    }
-
-    func load(_ url: URL) {
+    /// Loads a document into the editor and preview. `recordsHistory` is false for Back and
+    /// Forward, and for a tab's own document, whose history the tab restores.
+    func load(_ url: URL, recordsHistory: Bool = true) {
         saveNow()
         guard let content = Self.read(url) else {
             NSSound.beep()
@@ -838,7 +865,7 @@ final class AppModel {
         pendingScrollReset = true
         render(debounce: false)
         defaults.set(url.path, forKey: Keys.lastFile)
-        recordVisit(url.path)
+        recordVisit(url.path, recordsHistory: recordsHistory)
         tabDidLoad(url)
     }
 
@@ -875,7 +902,7 @@ final class AppModel {
             savedText = text
             if saveError != nil { saveError = nil }
             if isCurrentDocumentMissing { updateMissingDocuments() }
-            gitDocumentSaved()
+            git.documentSaved()
         } catch {
             saveError = "Couldn’t save: \(error.localizedDescription)"
         }
@@ -921,12 +948,7 @@ final class AppModel {
         viewMode = mode
         defaults.set(mode.rawValue, forKey: Keys.viewMode)
         if isFindBarVisible { refreshFind(scroll: false) }
-        if mode != .read {
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: 50_000_000)
-                self?.editor.focus()
-            }
-        }
+        if mode != .read { editor.whenVisible { [weak self] in self?.editor.focus() } }
     }
 
     func zoom(by step: Int) {
@@ -948,10 +970,10 @@ final class AppModel {
 
     // MARK: - Navigation
 
-    private func recordVisit(_ path: String) {
+    private func recordVisit(_ path: String, recordsHistory: Bool) {
         recentFiles = Array(([path] + recentFiles.filter { $0 != path }).prefix(30))
         defaults.set(recentFiles, forKey: Keys.recentFiles)
-        guard !isNavigatingHistory else { return }
+        guard recordsHistory else { return }
         if historyIndex < history.count - 1 { history.removeSubrange((historyIndex + 1)...) }
         if history.last != path { history.append(path) }
         historyIndex = history.count - 1
@@ -970,9 +992,7 @@ final class AppModel {
         }
         guard index >= 0, index < history.count else { NSSound.beep(); return }
         historyIndex = index
-        isNavigatingHistory = true
-        open(URL(fileURLWithPath: history[index]))
-        isNavigatingHistory = false
+        open(URL(fileURLWithPath: history[index]), placement: .active, recordsHistory: false)
     }
 
     func toggleSidebar() {

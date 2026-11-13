@@ -1,4 +1,5 @@
 import Foundation
+import LexMDRendering
 
 /// A file or folder that moved from one absolute path to another.
 struct PathMove: Hashable, Sendable {
@@ -42,7 +43,7 @@ struct MarkdownLinkSpan: Equatable {
 // MARK: - Scanner
 
 /// Finds the exact ranges of link destinations while skipping front matter, fenced and indented
-/// code, and code spans. Wiki links are skipped here; `WikiLink.parse(in:)` finds those.
+/// code, and code spans. Wiki links are skipped here; `DocumentStructure.analyze(_:)` finds those.
 enum MarkdownLinkScanner {
     private struct Line {
         var start: Int
@@ -59,7 +60,7 @@ enum MarkdownLinkScanner {
     static func links(in text: String) -> [MarkdownLinkSpan] {
         let s = Array(text.utf16)
         let lines = lineRanges(s)
-        let prose = proseLines(s, lines)
+        let prose = proseLines(s, lines, frontMatterLines: FrontMatter.split(text)?.lineCount ?? 0)
         var result: [MarkdownLinkSpan] = []
         var segment: (start: Int, end: Int)?
         for (index, line) in lines.enumerated() {
@@ -135,20 +136,12 @@ enum MarkdownLinkScanner {
     }
 
     /// Marks lines that hold Markdown prose rather than code or front matter.
-    private static func proseLines(_ s: [UInt16], _ lines: [Line]) -> [Bool] {
+    private static func proseLines(_ s: [UInt16], _ lines: [Line], frontMatterLines: Int) -> [Bool] {
         var prose = Array(repeating: true, count: lines.count)
-        var index = 0
-        // YAML front matter.
-        if let first = lines.first, String(utf16CodeUnits: Array(s[first.start..<first.end]), count: first.end - first.start) == "---" {
-            if let close = lines.indices.dropFirst().first(where: {
-                let line = lines[$0]
-                let text = String(utf16CodeUnits: Array(s[line.start..<line.end]), count: line.end - line.start)
-                return text == "---" || text == "..."
-            }) {
-                for i in 0...close { prose[i] = false }
-                index = close + 1
-            }
-        }
+        // YAML front matter, as the preview reads it.
+        let index0 = min(frontMatterLines, lines.count)
+        for i in 0..<index0 { prose[i] = false }
+        var index = index0
         var openFence: (char: UInt16, count: Int)?
         var inIndentedCode = false
         var previousBlank = true
@@ -469,7 +462,7 @@ enum LinkRewriter {
     ///
     /// Inline links count only where the Markdown parser sees a link too, so links in code, raw
     /// HTML, math, and footnote references are never touched. Wiki links come from
-    /// `WikiLink.parse(in:)`, which skips the same places and `[[^1]]` footnotes.
+    /// `DocumentStructure.analyze(_:)`, which skips the same places and `[[^1]]` footnotes.
     static func edits(in text: String, oldPath: String, newPath: String, context: Context) -> [TextEdit] {
         let spans = MarkdownLinkScanner.links(in: text)
         guard !spans.isEmpty || text.contains("[[") else { return [] }
@@ -522,10 +515,10 @@ enum LinkRewriter {
         let wasEncoded = decoded != unescaped
         guard !decoded.isEmpty else { return nil }
 
-        let oldTarget = normalize(oldDirectory + "/" + decoded)
+        let oldTarget = (oldDirectory + "/" + decoded).standardizedPath
         let newTarget = context.newLocation(of: oldTarget)
         guard newTarget != oldTarget || newDirectory != oldDirectory else { return nil }
-        var relative = relativePath(from: newDirectory, to: newTarget)
+        var relative = LinkPaths.relative(newTarget, from: newDirectory)
         if trimmedRelative(relative) == trimmedRelative(decoded) { return nil }
         if decoded.hasPrefix("./"), !relative.hasPrefix("../"), relative != "." { relative = "./" + relative }
         if decoded.hasSuffix("/"), !relative.hasSuffix("/") { relative += "/" }
@@ -538,7 +531,7 @@ enum LinkRewriter {
         } else {
             encoded = escapeRaw(relative)
         }
-        return encoded + suffix
+        return LinkPaths.guardingScheme(encoded) + suffix
     }
 
     private static let encodedPathAllowed: CharacterSet = {
@@ -603,27 +596,6 @@ enum LinkRewriter {
     }
 
     /// Resolves `.` and `..` without touching the file system.
-    static func normalize(_ path: String) -> String {
-        var components: [Substring] = []
-        for component in path.split(separator: "/", omittingEmptySubsequences: true) {
-            if component == "." { continue }
-            if component == ".." {
-                if !components.isEmpty { components.removeLast() }
-                continue
-            }
-            components.append(component)
-        }
-        return "/" + components.joined(separator: "/")
-    }
-
-    static func relativePath(from directory: String, to target: String) -> String {
-        let base = directory.split(separator: "/")
-        let goal = target.split(separator: "/")
-        var common = 0
-        while common < base.count, common < goal.count, base[common] == goal[common] { common += 1 }
-        let parts = Array(repeating: "..", count: base.count - common) + goal[common...].map(String.init)
-        return parts.isEmpty ? "." : parts.joined(separator: "/")
-    }
 }
 
 // MARK: - Planning and writing

@@ -31,18 +31,40 @@ extension AppModel {
         persistTabs()
     }
 
-    /// Lets a selection open in a new tab (Command-click) or switch to the tab that already
-    /// shows it. Returns true when handled here.
-    func routeSelectionToTabs(_ path: String) -> Bool {
-        if currentFile != nil, Self.isCommandClick(Self.currentEvent()) {
+    /// Shows a document: the one way to open a document in the window. `selectedPath` follows
+    /// it in the sidebar. A failed load leaves the open document (and its highlight) in place.
+    func showDocument(_ path: String, placement: DocumentPlacement = .reuseTab, recordsHistory: Bool = true) {
+        if path != currentFile?.path {
+            if placement == .reuseTab, let existing = tabStore.list.tab(withPath: path), existing.id != tabStore.list.activeID {
+                selectTab(existing.id)
+                return
+            }
+            load(URL(fileURLWithPath: path), recordsHistory: recordsHistory)
+        }
+        selectedPath = currentFile?.path
+    }
+
+    /// The sidebar's selection changed, from a click or the arrow keys. Command-click opens the
+    /// row in a new tab, and a secondary click leaves the open document alone while the row's
+    /// menu shows. The list reports no event, so the event being handled says which click it was.
+    func sidebarSelected(_ path: String?) {
+        guard let path, path != currentFile?.path else {
+            // Keep the open document highlighted when the list clears its selection.
+            selectedPath = currentFile?.path
+            return
+        }
+        let event = Self.currentEvent()
+        if Self.isContextClick(event) {
+            // Opening the row here would replace the document in the active tab before a
+            // command such as Open in New Tab runs.
+            selectedPath = currentFile?.path
+            return
+        }
+        if currentFile != nil, Self.isCommandClick(event) {
             openInNewTab(path)
-            return true
+            return
         }
-        if !isNavigatingHistory, let existing = tabStore.list.tab(withPath: path), existing.id != tabStore.list.activeID {
-            selectTab(existing.id)
-            return true
-        }
-        return false
+        showDocument(path)
     }
 
     static func isCommandClick(_ event: NSEvent?) -> Bool {
@@ -140,7 +162,7 @@ extension AppModel {
         guard currentFile != nil, tabStore.list.activeID != nil else {
             Self.tabLog.notice("No active tab; opening in place")
             reveal(path)
-            selectedPath = path
+            showDocument(path, placement: .active)
             return
         }
         guard path != currentFile?.path else {
@@ -314,9 +336,7 @@ extension AppModel {
         let saved = target.state
         history = saved.history.isEmpty ? [target.path] : saved.history
         historyIndex = saved.history.isEmpty ? 0 : min(max(saved.historyIndex, 0), history.count - 1)
-        isNavigatingHistory = true
-        load(URL(fileURLWithPath: target.path))
-        isNavigatingHistory = false
+        load(URL(fileURLWithPath: target.path), recordsHistory: false)
         guard currentFile?.path == target.path else { return false }
         restoreViewState(saved)
         tabStore.list.update(target.id) { $0.state.unsavedText = nil }
@@ -400,54 +420,10 @@ extension AppModel {
     }
 }
 
-extension EditorController {
-    /// Puts back a remembered caret, selection, and scroll position.
-    func restore(selection: NSRange, origin: CGPoint?) {
-        let length = (textView.string as NSString).length
-        let location = min(selection.location, length)
-        textView.setSelectedRange(NSRange(location: location, length: min(selection.length, length - location)))
-        let clip = scrollView.contentView
-        guard let origin else { return }
-        if origin.y > clip.bounds.height, let layout = textView.textLayoutManager {
-            layout.ensureLayout(for: layout.documentRange)
-        }
-        let target = clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin
-        clip.scroll(to: target)
-        scrollView.reflectScrolledClipView(clip)
-    }
-
-    /// Replaces ranges as one undoable change, so Edit > Undo reverts them together.
-    @discardableResult
-    func applyEdits(_ edits: [TextEdit], actionName: String) -> Bool {
-        guard !edits.isEmpty else { return false }
-        textView.breakUndoCoalescing()
-        var applied = false
-        for edit in edits.sorted(by: { $0.range.location > $1.range.location }) {
-            guard NSMaxRange(edit.range) <= (textView.string as NSString).length,
-                  textView.shouldChangeText(in: edit.range, replacementString: edit.replacement) else { continue }
-            textView.textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
-            textView.didChangeText()
-            applied = true
-        }
-        if applied {
-            textView.undoManager?.setActionName(actionName)
-            registerTextChangeOnUndo()
-        }
-        textView.breakUndoCoalescing()
-        return applied
-    }
-
-    /// Undoing or redoing edits made through the text storage does not report the change to
-    /// the delegate, so the model would keep (and autosave) the text from before the undo. This
-    /// reports it once the undo or redo has run.
-    func registerTextChangeOnUndo() {
-        textView.undoManager?.registerUndo(withTarget: self) { editor in
-            MainActor.assumeIsolated {
-                editor.registerTextChangeOnUndo()
-                DispatchQueue.main.async {
-                    editor.textDidChange(Notification(name: NSText.didChangeNotification, object: editor.textView))
-                }
-            }
-        }
-    }
+/// Where `showDocument(_:placement:recordsHistory:)` puts a document.
+enum DocumentPlacement {
+    /// Switch to the tab that already shows it, or load it in the active tab.
+    case reuseTab
+    /// Load it in the active tab even when another tab shows it, as Back and Forward do.
+    case active
 }

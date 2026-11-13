@@ -94,6 +94,34 @@ struct SidebarTreeTests {
         #expect(!library)
     }
 
+    /// ~/Library is skipped unless the project is inside it, as an iCloud Drive folder is; the
+    /// link index follows the same rules as the tree.
+    @Test func eventsFollowOneSetOfSkipRules() {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let iCloud = home + "/Library/Mobile Documents/com~apple~CloudDocs/Notes"
+        #expect(FileScanner.eventPath(home + "/Library/Caches/app", root: home) == nil)
+        #expect(FileScanner.eventPath(iCloud + "/a.md", root: iCloud) == iCloud + "/a.md")
+        #expect(FileScanner.eventPath(iCloud + "/folder/", root: iCloud) == iCloud + "/folder", "the trailing slash is dropped")
+        #expect(FileScanner.eventPath(iCloud + "/.git/HEAD", root: iCloud) == nil)
+
+        func event(_ path: String, _ flags: Int) -> DirectoryWatcher.Event {
+            DirectoryWatcher.Event(path: path, flags: FSEventStreamEventFlags(flags))
+        }
+        let dir = kFSEventStreamEventFlagItemIsDir
+        let newFolder = AppModel.linkIndexChanges([event(home + "/notes", kFSEventStreamEventFlagItemCreated | dir)], root: home)
+        #expect(!newFolder.rebuild, "a new folder starts empty")
+        let cache = AppModel.linkIndexChanges([event(home + "/Library/Caches/x", kFSEventStreamEventFlagItemRenamed | dir)], root: home)
+        #expect(!cache.rebuild && cache.paths.isEmpty, "~/Library churn is skipped")
+        let moved = AppModel.linkIndexChanges([event(home + "/notes/", kFSEventStreamEventFlagItemRenamed | dir)], root: home)
+        #expect(moved.rebuild)
+        let edits = AppModel.linkIndexChanges([
+            event(home + "/notes/a.md", kFSEventStreamEventFlagItemModified),
+            event(home + "/notes/pic.png", kFSEventStreamEventFlagItemCreated),
+            event(home + "/notes/data.json", kFSEventStreamEventFlagItemModified),
+        ], root: home)
+        #expect(!edits.rebuild && edits.paths == [home + "/notes/a.md", home + "/notes/pic.png"])
+    }
+
     @Test func eventsWithoutStructuralFlagsSkipTheTreeLookup() {
         var looked = false
         let changed = FileScanner.eventChangesTree(

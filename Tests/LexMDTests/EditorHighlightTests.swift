@@ -1,6 +1,7 @@
 import AppKit
 import Testing
 @testable import LexMD
+import LexMDRendering
 
 /// The editor restyles only edited paragraphs; the result must always match a full pass.
 @MainActor
@@ -48,6 +49,33 @@ struct EditorHighlightTests {
             editor.textView.insertText(insert, replacementRange: range)
             try #require(Self.matchesFullHighlight(editor), "seed \(seed), step \(step): \(insert.debugDescription) at \(range)")
         }
+    }
+
+    /// A fence closes on a longer run of the same character, as CommonMark, the preview and link
+    /// updates read it; the text after it is not code.
+    @Test func fenceClosesOnALongerRun() {
+        let text = "```\ncode\n````\nafter\n~~~~\nmore\n~~~\nstill code\n~~~~~\nend\n"
+        let fences = MarkdownHighlighter.blocks(in: text).items.filter { $0.kind == .fence }
+        let ns = text as NSString
+        #expect(fences.map { ns.substring(with: $0.range) } == ["```\ncode\n````", "~~~~\nmore\n~~~\nstill code\n~~~~~"])
+        #expect(fences.allSatisfy { $0.closed })
+    }
+
+    /// Front matter is recognized with CRLF line ends and an indented closing line, exactly where
+    /// the preview finds it, and a two-line document has none.
+    @Test func frontMatterFollowsThePreviewsRule() {
+        let crlf = "---\r\ntitle: x\r\n---\r\nBody\r\n"
+        let items = MarkdownHighlighter.blocks(in: crlf).items.filter { $0.kind == .frontMatter }
+        #expect(items.map { (crlf as NSString).substring(with: $0.range) } == ["---\r\ntitle: x\r\n---"])
+
+        let split = FrontMatter.split("---\na: 1\n  ---  \nBody")
+        #expect(split?.yaml == "a: 1" && split?.rest == "Body" && split?.lineCount == 3 && split?.length == 17)
+        #expect(FrontMatter.split("---\r\na: 1\r\n---\r\nB")?.length == 16)
+        #expect(FrontMatter.split("---\n---\nBody")?.yaml == "")
+        #expect(FrontMatter.split("---\n---") == nil)
+        #expect(FrontMatter.split("---\na: 1\n") == nil, "unclosed")
+        #expect(FrontMatter.split("--- \na: 1\n---\n") == nil, "the opening line is exactly ---")
+        #expect(DocumentStructure.analyze("---\nlink: [x](y.md)\n---\n# Title\n").headings.first?.line == 4)
     }
 
     @Test func largeDocumentsRestyleOnlyTheEditedParagraph() {

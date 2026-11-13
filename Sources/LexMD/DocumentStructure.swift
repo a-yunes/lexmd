@@ -37,7 +37,8 @@ struct DocumentStructure: Sendable {
     var anchors: Set<String> { Set(headings.map(\.slug)).union(htmlIDs) }
 
     static func analyze(_ source: String) -> DocumentStructure {
-        let (body, lineOffset, frontMatterLength) = splitFrontMatter(source)
+        let split = FrontMatter.split(source)
+        let (body, lineOffset, frontMatterLength) = (split?.rest ?? source, split?.lineCount ?? 0, split?.length ?? 0)
         let lines = SourceLines(source)
         var walker = StructureWalker(lines: lines, lineOffset: lineOffset)
         walker.visit(Document(parsing: body))
@@ -69,19 +70,6 @@ struct DocumentStructure: Sendable {
         }
         result.links.sort { $0.range.location < $1.range.location }
         return result
-    }
-
-    /// Splits off YAML front matter exactly as `MarkdownHTML` does. Returns the body, the number
-    /// of lines before it, and the UTF-16 length of the front matter.
-    private static func splitFrontMatter(_ source: String) -> (String, Int, Int) {
-        guard source.hasPrefix("---\n") || source.hasPrefix("---\r\n") else { return (source, 0, 0) }
-        let lines = source.components(separatedBy: "\n")
-        guard lines.count > 2 else { return (source, 0, 0) }
-        for i in 1..<lines.count where lines[i].trimmingCharacters(in: .whitespacesAndNewlines) == "---" {
-            let length = lines[0...i].reduce(0) { $0 + ($1 as NSString).length + 1 }
-            return (lines[(i + 1)...].joined(separator: "\n"), i + 1, length)
-        }
-        return (source, 0, 0)
     }
 
     /// Heading ids as the preview assigns them: from the heading text with math as written.

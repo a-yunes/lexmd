@@ -53,6 +53,8 @@ struct QuickLookPageTests {
         #expect(html.contains("flowchart LR"))
         // Styles from the app, light and dark, and a policy that blocks scripts and the network.
         #expect(html.contains(PreviewStyle.page))
+        #expect(html.contains(PreviewStyle.standalone))
+        #expect(!html.contains("::-webkit-scrollbar { width: 0"), "only the in-app preview hides scroll bars")
         #expect(html.contains(PreviewStyle.rendering))
         #expect(html.contains("@media (prefers-color-scheme: dark)"))
         #expect(html.contains("default-src 'none'"))

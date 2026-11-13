@@ -244,7 +244,7 @@ struct SidebarView: View {
         let rows = model.rootURL == nil ? [] : model.visibleRows
         Group {
             if let root = model.rootURL {
-                List(selection: $model.selectedPath) {
+                List(selection: Binding(get: { model.selectedPath }, set: { model.sidebarSelected($0) })) {
                     Section {
                         ForEach(rows) { row in
                             FileRow(row: row)

@@ -50,7 +50,8 @@ extension PreviewTemplate {
 
   // Diagram output is treated as untrusted: anything that could run code, load content, or
   // navigate somewhere unexpected is removed before it reaches the document.
-  var DROP = /^(script|foreignobject|iframe|frame|embed|object|applet|animate|animatemotion|animatetransform|set|discard|handler|listener|audio|video|canvas|link|meta|base|form|input|button|textarea|select)$/i;
+  // Beyond what no page may contain, diagrams have no use for media or form controls.
+  var DROP = /^(\#(UnsafeMarkup.elements)|audio|video|canvas|form|input|button|textarea|select)$/i;
   var LINK_OK = /^(https?:|mailto:|#)/i;
   var IMAGE_OK = /^data:image\/(png|jpe?g|gif|webp);/i;
   function clean(root) {
@@ -233,4 +234,16 @@ extension PreviewTemplate {
   };
 })();
 """#
+}
+
+/// Elements that no rendered page, diagram, or export may contain: they run code, load other
+/// documents, or change attributes on their own. Diagram output and exported HTML are each
+/// cleaned with this list; their URL rules differ, since a document links to its files and a
+/// diagram does not.
+enum UnsafeMarkup {
+    static let elements = [
+        "script", "noscript", "template", "iframe", "frame", "frameset", "portal", "object", "embed", "applet",
+        "noembed", "noframes", "xmp", "plaintext", "base", "meta", "link", "foreignobject",
+        "set", "animate", "animatemotion", "animatetransform", "discard", "handler", "listener",
+    ].joined(separator: "|")
 }

@@ -197,10 +197,10 @@ extension AppModel {
         switch item {
         case .file(let file):
             reveal(file.path)
-            if newTab { openInNewTab(file.path) } else { selectedPath = file.path }
+            if newTab { openInNewTab(file.path) } else { showDocument(file.path) }
         case .hit(let hit):
             reveal(hit.path)
-            if newTab { openInNewTab(hit.path) } else { selectedPath = hit.path }
+            if newTab { openInNewTab(hit.path) } else { showDocument(hit.path) }
             revealOccurrence(hit.occurrence)
         }
     }
