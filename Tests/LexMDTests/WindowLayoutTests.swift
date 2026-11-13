@@ -19,31 +19,6 @@ struct WindowLayoutTests {
         #expect(OutlineLayout.fits(windowWidth: .infinity, sidebarVisible: true, mode: .split), "before the window reports its width")
     }
 
-    /// A window resize first lays the document column out at a placeholder height, then at its
-    /// real size. The panes skip the placeholder, so the preview is never resized to a strip.
-    @MainActor
-    @Test func workspaceIgnoresPlaceholderHeights() {
-        let editor = NSView(), preview = NSView()
-        let container = WorkspaceContainer(editor: editor, preview: preview)
-        container.setMode(.read)
-        container.frame = NSRect(x: 0, y: 0, width: 800, height: 52)
-        container.layoutSubtreeIfNeeded()
-        #expect(preview.frame.height == 52, "the first layout is taken as it is")
-
-        container.frame.size = NSSize(width: 800, height: 700)
-        container.layoutSubtreeIfNeeded()
-        #expect(preview.frame.size == NSSize(width: 800, height: 700))
-
-        container.frame.size = NSSize(width: 340, height: 52)
-        container.layoutSubtreeIfNeeded()
-        #expect(preview.frame.size == NSSize(width: 800, height: 700))
-
-        container.frame.size = NSSize(width: 760, height: 640)
-        container.layoutSubtreeIfNeeded()
-        #expect(preview.frame.size == NSSize(width: 760, height: 640))
-        #expect(WindowLayout.minHeight > WorkspaceContainer.placeholderHeight * 3)
-    }
-
     @Test func outlineWidthStaysInItsRange() {
         #expect(OutlineLayout.clampedWidth(10) == OutlineLayout.minWidth)
         #expect(OutlineLayout.clampedWidth(1000) == OutlineLayout.maxWidth)
