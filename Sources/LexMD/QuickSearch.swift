@@ -48,6 +48,10 @@ struct QuickSearchResults: Sendable {
     var hitCounts: [String: Int] = [:]
     var truncated = false
     var error: String?
+    /// The query and options that found these results; a hit is revealed with them, not with
+    /// whatever has been typed since.
+    var query = ""
+    var options = SearchOptions()
 
     var hitFileCount: Int { hitCounts.count }
 }
@@ -331,13 +335,10 @@ final class TextCache: @unchecked Sendable {
     }
 }
 
-/// Reads a document as LexMD opens it: UTF-8, then the encoding the file declares or
-/// Foundation detects (UTF-16 with a byte order mark, for example), then Latin-1.
+/// Reads a document as LexMD opens it, with `TextFile`'s rules: a byte order mark, then UTF-8,
+/// then Latin-1, which maps every byte, so saving writes the bytes it read back unchanged.
 enum DocumentText {
     static func read(_ url: URL) -> String? {
-        if let s = try? String(contentsOf: url, encoding: .utf8) { return s }
-        var encoding = String.Encoding.utf8
-        if let s = try? String(contentsOf: url, usedEncoding: &encoding) { return s }
-        return try? String(contentsOf: url, encoding: .isoLatin1)
+        TextFile.read(url)?.text
     }
 }

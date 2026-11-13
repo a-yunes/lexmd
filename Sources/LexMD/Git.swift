@@ -69,8 +69,31 @@ struct Git: Sendable {
     }
 
     /// The located git, or nil when none is usable. Resolving runs processes, so call it off
-    /// the main thread. The result is cached.
-    static let system: Git? = locate()
+    /// the main thread. A git that was found is cached; a lookup that found none is tried
+    /// again next time, so one failed lookup doesn't turn git off until relaunch.
+    static var system: Git? {
+        if let found = systemLock.withLock({ systemCache }) { return found }
+        // Outside any task: cancelling the discover that asked must not kill the lookup halfway.
+        let found = outsideAnyTask { locate() }
+        if let found { systemLock.withLock { systemCache = found } }
+        return found
+    }
+
+    /// Runs `work` on another thread and waits for it. `DispatchQueue.sync` may run its block on
+    /// the calling thread, still inside the caller's task, so this hops explicitly.
+    static func outsideAnyTask<T>(_ work: @escaping @Sendable () -> T) -> T {
+        let box = ResultBox<T>()
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async {
+            box.value = work()
+            done.signal()
+        }
+        done.wait()
+        return box.value!
+    }
+
+    private static let systemLock = NSLock()
+    nonisolated(unsafe) private static var systemCache: Git?
 
     /// Finds git without triggering the Command Line Tools install dialog: /usr/bin/git is only
     /// used through xcrun after `xcode-select -p` confirms a developer directory exists.
@@ -255,4 +278,9 @@ enum ProcessRunner {
             group.leave()
         }
     }
+}
+
+/// Carries a value from the thread that computes it to the one waiting on a semaphore.
+private final class ResultBox<T>: @unchecked Sendable {
+    var value: T?
 }

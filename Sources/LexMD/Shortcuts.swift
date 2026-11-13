@@ -293,6 +293,88 @@ extension AppModel {
         shortcutOverrides[action.rawValue] != nil
     }
 
+    /// Makes stored overrides consistent again: one command per shortcut, and none that macOS
+    /// keeps for itself. Overrides saved before a default existed can collide with it; the
+    /// shortcut the user chose wins, and the command whose default it was gets none.
+    static func resolvingShortcutConflicts(_ stored: [String: String]) -> (overrides: [String: String], cleared: [ShortcutAction]) {
+        var overrides = stored
+        // A reserved combination never works; the command goes back to its default.
+        for action in ShortcutAction.allCases {
+            if let value = overrides[action.rawValue], value != noShortcut,
+               Shortcut(string: value)?.reservationNote != nil {
+                overrides[action.rawValue] = nil
+            }
+        }
+        var claimed: Set<String> = []
+        var cleared: [ShortcutAction] = []
+        // Chosen shortcuts first, in menu order; a later duplicate loses its shortcut.
+        for action in ShortcutAction.allCases {
+            guard let value = overrides[action.rawValue], value != noShortcut else { continue }
+            if !claimed.insert(value).inserted { overrides[action.rawValue] = noShortcut }
+        }
+        for action in ShortcutAction.allCases where overrides[action.rawValue] == nil {
+            guard let value = action.defaultShortcut?.string else { continue }
+            if claimed.contains(value) {
+                overrides[action.rawValue] = noShortcut
+                cleared.append(action)
+            } else {
+                claimed.insert(value)
+            }
+        }
+        return (overrides, cleared)
+    }
+
+    // MARK: Recording
+
+    /// Starts recording a shortcut for `action` in `window` (Settings), stopping any other recording.
+    func startRecordingShortcut(_ action: ShortcutAction, in window: NSWindow?) {
+        stopRecordingShortcut()
+        recordingShortcut = action
+        shortcutWindow = window
+        shortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.recordShortcutKey(event) ?? event
+        }
+    }
+
+    func stopRecordingShortcut() {
+        recordingShortcut = nil
+        shortcutWindow = nil
+        if let monitor = shortcutMonitor {
+            NSEvent.removeMonitor(monitor)
+            shortcutMonitor = nil
+        }
+    }
+
+    /// Handles a key while recording. Keys for other windows stop the recording and go on to
+    /// their window, so typing in a document is never taken for a shortcut.
+    func recordShortcutKey(_ event: NSEvent) -> NSEvent? {
+        guard let action = recordingShortcut else { return event }
+        if let window = shortcutWindow, event.window !== window {
+            stopRecordingShortcut()
+            return event
+        }
+        let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        if event.keyCode == 53, modifiers.isEmpty {
+            stopRecordingShortcut()
+        } else if event.keyCode == 51 || event.keyCode == 117, modifiers.isEmpty {
+            setShortcut(nil, for: action)
+            stopRecordingShortcut()
+        } else if let shortcut = Shortcut(event: event, allowingPlainKeys: action.allowsPlainKeys) {
+            if let note = shortcut.reservationNote {
+                // Keep recording so another combination can be tried right away.
+                shortcutNote = note
+                AccessibilityNotification.Announcement(note).post()
+                NSSound.beep()
+            } else {
+                setShortcut(shortcut, for: action)
+                stopRecordingShortcut()
+            }
+        } else {
+            NSSound.beep()
+        }
+        return nil
+    }
+
     /// Assigns a shortcut; any other command already using it loses its shortcut.
     func setShortcut(_ shortcut: Shortcut?, for action: ShortcutAction) {
         var overrides = shortcutOverrides

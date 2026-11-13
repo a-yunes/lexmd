@@ -15,6 +15,8 @@ final class SidebarFileState {
     @ObservationIgnored var recycler: FileOperations.Recycler = FileOperations.systemRecycler
     /// Items on their way to the Trash; autosave must not recreate documents inside them.
     @ObservationIgnored var trashing: Set<String> = []
+    /// Link updates being planned or waiting for an answer, by the moves they are for.
+    @ObservationIgnored var pendingLinkUpdates: [UUID: [PathMove]] = [:]
 
     func isTrashing(_ path: String) -> Bool {
         trashing.contains { path == $0 || path.hasPrefix($0 + "/") }
@@ -28,6 +30,8 @@ final class LinkWriteRecord {
     var task: Task<Void, Never>?
     /// The open document's text around its part of the update, which the editor can undo.
     var openDocument: RewrittenFile?
+    /// Unsaved text of other tabs that the update changed in memory.
+    var tabTexts: [RewrittenFile] = []
 }
 
 extension AppModel {
@@ -199,7 +203,8 @@ extension AppModel {
             open(url)
             return true
         }
-        var moved = false
+        var moved: [PathMove] = []
+        var markdownMoves: [PathMove] = []
         for source in inside where (source as NSString).deletingLastPathComponent != target {
             let name = (source as NSString).lastPathComponent
             if let problem = FileOperations.moveProblem(source, into: target) {
@@ -207,17 +212,23 @@ extension AppModel {
                 continue
             }
             let move = PathMove(from: source, to: (target as NSString).appendingPathComponent(name))
-            if performMove(move, actionName: "Move", offerLinks: true) { moved = true }
+            let hasMarkdown = movesMarkdown(move.from)
+            // Links are planned once every item has moved: a plan made between two moves of one
+            // drop would point links between them at the old place.
+            if performMove(move, actionName: "Move", offerLinks: false) {
+                moved.append(move)
+                if hasMarkdown { markdownMoves.append(move) }
+            }
         }
-        return moved
+        if !markdownMoves.isEmpty { offerLinkUpdate(for: markdownMoves) }
+        return !moved.isEmpty
     }
 
     /// Renames or moves an item, updates the tree, tabs and history at once, and offers to
     /// update links. Undo moves it back.
     @discardableResult
     func performMove(_ move: PathMove, actionName: String, offerLinks: Bool) -> Bool {
-        let node = FileTreeEdit.node(at: move.from, in: tree)
-        let hadMarkdown = node.map(FileTreeEdit.containsMarkdown) ?? FileScanner.isMarkdown(path: move.from)
+        let hadMarkdown = movesMarkdown(move.from)
         saveNow()
         do {
             try FileOperations.move(URL(fileURLWithPath: move.from), to: URL(fileURLWithPath: move.to))
@@ -232,8 +243,13 @@ extension AppModel {
             }
             undo.setActionName(actionName)
         }
-        if offerLinks, hadMarkdown { offerLinkUpdate(for: move) }
+        if offerLinks, hadMarkdown { offerLinkUpdate(for: [move]) }
         return true
+    }
+
+    /// Whether the item at `path` is or holds a Markdown document, whose links a move can affect.
+    private func movesMarkdown(_ path: String) -> Bool {
+        FileTreeEdit.node(at: path, in: tree).map(FileTreeEdit.containsMarkdown) ?? FileScanner.isMarkdown(path: path)
     }
 
     /// Updates everything that refers to moved paths.
@@ -258,6 +274,7 @@ extension AppModel {
 
     func duplicateItem(_ url: URL) {
         saveNow()
+        let root = rootURL
         Task { [weak self] in
             let result = await runDetached { () -> Result<FileNode, Error> in
                 do {
@@ -271,7 +288,8 @@ extension AppModel {
                     return .failure(error)
                 }
             }
-            guard let self else { return }
+            // The copy is made either way; the sidebar and undo belong to the project it was made in.
+            guard let self, self.rootURL == root else { return }
             switch result {
             case .success(let node):
                 if let root = self.rootURL?.path, FileTreeEdit.containsMarkdown(node) {
@@ -282,7 +300,14 @@ extension AppModel {
                 self.filesDidChange(structure: true)
                 if let undo = self.fileUndoManager {
                     undo.registerUndo(withTarget: self) { model in
-                        MainActor.assumeIsolated { model.moveToTrash(node.url, registerUndo: false) }
+                        MainActor.assumeIsolated {
+                            // Redo duplicates the original again, and that copy can be undone in turn.
+                            model.fileUndoManager?.registerUndo(withTarget: model) { model in
+                                MainActor.assumeIsolated { model.duplicateItem(url) }
+                            }
+                            model.fileUndoManager?.setActionName("Duplicate")
+                            model.moveToTrash(node.url, registerUndo: false)
+                        }
                     }
                     undo.setActionName("Duplicate")
                 }
@@ -338,8 +363,10 @@ extension AppModel {
         sidebarFiles.newFolders = sidebarFiles.newFolders.filter { !inside($0) }
         tree = FileTreeEdit.removing(path, from: tree, keep: sidebarFiles.newFolders)
         if let renaming = sidebarFiles.renamingPath, inside(renaming) { sidebarFiles.renamingPath = nil }
+        // The index keeps naming the shown document: entries removed before it shift it back.
+        let removedBefore = history.prefix(max(historyIndex, 0)).filter(inside).count
         history = history.filter { !inside($0) }
-        historyIndex = min(historyIndex, history.count - 1)
+        historyIndex = min(historyIndex - removedBefore, history.count - 1)
         // Text that never reached the disk (typed while the item was moving, or that a tab could
         // not save) goes with its document to the Trash rather than being dropped with the tab;
         // what can't be written there is offered for saving elsewhere once the tabs are closed.
@@ -378,8 +405,9 @@ extension AppModel {
         reveal(path)
         rescan()
         filesDidChange(structure: true)
+        // Redo trashes it again, and that trash can be undone in turn.
         fileUndoManager?.registerUndo(withTarget: self) { model in
-            MainActor.assumeIsolated { model.moveToTrash(URL(fileURLWithPath: path), registerUndo: false) }
+            MainActor.assumeIsolated { model.moveToTrash(URL(fileURLWithPath: path)) }
         }
     }
 
@@ -393,25 +421,69 @@ extension AppModel {
         return texts
     }
 
-    /// Finds links that the move affects and asks whether to update them.
-    func offerLinkUpdate(for move: PathMove) {
+    /// Finds links that the moves affect and asks whether to update them. A move that takes an
+    /// item on from where a pending update left it (A to B, then B to C) replaces that update
+    /// with one from A to C, so links to A are not left behind.
+    func offerLinkUpdate(for newMoves: [PathMove]) {
         guard let root = rootURL?.path else { return }
+        var moves = newMoves
+        for (id, pending) in sidebarFiles.pendingLinkUpdates {
+            var continued = false
+            let chained = pending.map { earlier -> PathMove in
+                guard let later = moves.first(where: { $0.from == earlier.to }) else { return earlier }
+                continued = true
+                return PathMove(from: earlier.from, to: later.to)
+            }
+            guard continued else { continue }
+            sidebarFiles.pendingLinkUpdates[id] = nil
+            moves.removeAll { later in pending.contains { $0.to == later.from } }
+            moves = chained + moves
+        }
+        moves.removeAll { $0.from == $0.to }
+        guard !moves.isEmpty else { return }
+        let id = UUID()
+        let planned = moves
+        sidebarFiles.pendingLinkUpdates[id] = planned
         let files = FileScanner.searchableFiles(in: tree, root: root).map(\.path)
         let overrides = openDocumentTexts()
         Task { [weak self] in
             let (context, plan) = await runDetached { () -> (LinkRewriter.Context, LinkUpdatePlan) in
-                let context = LinkUpdater.context(root: root, move: move, markdownFiles: files)
+                let context = LinkUpdater.context(root: root, moves: planned, markdownFiles: files)
                 return (context, LinkUpdater.plan(markdownFiles: files, context: context, overrides: overrides))
             }
-            guard let self, plan.linkCount > 0, self.rootURL?.path == root else { return }
-            self.askToUpdateLinks(plan, context: context, root: root)
+            guard let self else { return }
+            guard plan.linkCount > 0, self.linkUpdateIsCurrent(id, root: root) else {
+                self.sidebarFiles.pendingLinkUpdates[id] = nil
+                return
+            }
+            Self.askToUpdateLinks(plan, root) { [weak self] update in
+                guard let self else { return }
+                // Checked again: the moves may have been undone or continued while the question showed.
+                let current = self.linkUpdateIsCurrent(id, root: root)
+                self.sidebarFiles.pendingLinkUpdates[id] = nil
+                if update, current { self.applyLinkUpdate(plan, context: context) }
+            }
         }
     }
 
-    private func askToUpdateLinks(_ plan: LinkUpdatePlan, context: LinkRewriter.Context, root: String) {
-        present(Self.linkUpdateAlert(plan, root: root)) { [weak self] response in
-            if response == .alertFirstButtonReturn { self?.applyLinkUpdate(plan, context: context) }
+    /// The update is still wanted: nothing replaced it, the project is the same, and its moves
+    /// still describe the disk (an undone rename has its file back at the old path).
+    private func linkUpdateIsCurrent(_ id: UUID, root: String) -> Bool {
+        guard rootURL?.path == root, let moves = sidebarFiles.pendingLinkUpdates[id] else { return false }
+        let manager = FileManager.default
+        return moves.allSatisfy { move in
+            let caseOnly = move.from.lowercased() == move.to.lowercased()
+            return manager.fileExists(atPath: move.to) && (caseOnly || !manager.fileExists(atPath: move.from))
         }
+    }
+
+    /// Runs between a link update's disk writes and its update of open documents. Tests use it
+    /// to open a document in between.
+    static var afterLinkRewrite: (@MainActor () async -> Void)?
+
+    /// Asks whether to update the plan's links. Replaced in tests.
+    static var askToUpdateLinks: (_ plan: LinkUpdatePlan, _ root: String, _ reply: @escaping (Bool) -> Void) -> Void = { plan, root, reply in
+        AppModel.shared.present(AppModel.linkUpdateAlert(plan, root: root)) { reply($0 == .alertFirstButtonReturn) }
     }
 
     static func linkUpdateAlert(_ plan: LinkUpdatePlan, root: String) -> NSAlert {
@@ -456,7 +528,9 @@ extension AppModel {
             } else if let tab = tabStore.list.tabs.first(where: { $0.path == file.path && $0.state.unsavedText != nil }),
                       let unsaved = tab.state.unsavedText {
                 let edits = LinkRewriter.edits(in: unsaved, oldPath: oldPath, newPath: file.path, context: context)
-                tabStore.list.update(tab.id) { $0.state.unsavedText = TextEdit.apply(edits, to: unsaved) }
+                let after = TextEdit.apply(edits, to: unsaved)
+                tabStore.list.update(tab.id) { $0.state.unsavedText = after }
+                record.tabTexts.append(RewrittenFile(path: file.path, before: unsaved, after: after))
             } else {
                 onDisk.append(file.path)
             }
@@ -464,10 +538,12 @@ extension AppModel {
         let paths = onDisk
         record.task = Task { [weak self] in
             let result = await runDetached { LinkUpdater.rewrite(paths, context: context) }
+            await Self.afterLinkRewrite?()
             record.files = result.written
             // A file may have been opened, or got unsaved text, while it was being rewritten:
             // update the text in memory too, or autosave would write the old links back.
-            self?.rewriteOpenText(paths, context: context)
+            self?.rewriteOpenText(paths, written: result.written, context: context, record: record)
+            self?.acceptOwnWrites(result.written.map(\.path))
             self?.filesDidChange(structure: false, changed: result.written.map(\.path))
             if !result.failed.isEmpty {
                 self?.showFileProblem(
@@ -482,17 +558,25 @@ extension AppModel {
         undo?.setActionName("Update Links")
     }
 
-    /// Applies a link update to the in-memory text of open documents among `paths`. Text that
-    /// already has the new links is left as it is.
-    private func rewriteOpenText(_ paths: [String], context: LinkRewriter.Context) {
+    /// Applies a link update to the in-memory text of open documents among `paths`. Text edited
+    /// from the rewritten file, such as a document read after its file was rewritten and typed
+    /// into since, already has the new links and is left as it is: for a moved document,
+    /// applying the edits again would rebase its links twice.
+    private func rewriteOpenText(_ paths: [String], written: [RewrittenFile], context: LinkRewriter.Context, record: LinkWriteRecord) {
+        let after = Dictionary(written.map { ($0.path, $0.after) }, uniquingKeysWith: { first, _ in first })
         for path in paths {
             let oldPath = context.oldLocation(of: path)
             if path == currentFile?.path {
+                guard text != after[path], loadedText != after[path] else { continue }
                 let edits = LinkRewriter.edits(in: text, oldPath: oldPath, newPath: path, context: context)
                 editor.replace(edits, actionName: "Update Links")
-            } else if let tab = tabStore.list.tab(withPath: path), let unsaved = tab.state.unsavedText {
+            } else if let tab = tabStore.list.tab(withPath: path), let unsaved = tab.state.unsavedText,
+                      unsaved != after[path], tab.state.unsavedBase != after[path] {
                 let edits = LinkRewriter.edits(in: unsaved, oldPath: oldPath, newPath: path, context: context)
-                if !edits.isEmpty { tabStore.list.update(tab.id) { $0.state.unsavedText = TextEdit.apply(edits, to: unsaved) } }
+                guard !edits.isEmpty else { continue }
+                let after = TextEdit.apply(edits, to: unsaved)
+                tabStore.list.update(tab.id) { $0.state.unsavedText = after }
+                record.tabTexts.append(RewrittenFile(path: path, before: unsaved, after: after))
             }
         }
     }
@@ -514,11 +598,19 @@ extension AppModel {
             // Make sure the model has the editor's text before anything compares it.
             if editor.textView.string != text { editor.onTextChange?(editor.textView.string) }
         }
+        // Other tabs' unsaved text goes back too, unless it was edited since.
+        for change in record.tabTexts {
+            let (from, to) = forward ? (change.before, change.after) : (change.after, change.before)
+            if let tab = tabStore.list.tabs.first(where: { $0.path == change.path && $0.state.unsavedText == from }) {
+                tabStore.list.update(tab.id) { $0.state.unsavedText = to }
+            }
+        }
         let previous = record.task
         record.task = Task { [weak self] in
             await previous?.value
             let files = record.files
             let skipped = await runDetached { LinkUpdater.restore(files, forward: forward) }
+            self?.acceptOwnWrites(files.map(\.path).filter { !skipped.contains($0) })
             self?.filesDidChange(structure: false, changed: files.map(\.path))
             if !skipped.isEmpty {
                 self?.showFileProblem(

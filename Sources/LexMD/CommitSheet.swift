@@ -11,7 +11,14 @@ final class CommitSession: Identifiable {
     let projectRoot: String
     let repositories: [GitRepository]
     var repository: GitRepository {
-        didSet { if repository != oldValue { userChoices = [:]; selection = nil; reload() } }
+        didSet {
+            guard repository != oldValue else { return }
+            // A commit in progress keeps its repository: its result is reported for it.
+            guard !isCommitting else { repository = oldValue; return }
+            userChoices = [:]
+            selection = nil
+            reload()
+        }
     }
 
     private(set) var snapshot: GitStatusSnapshot?
@@ -160,6 +167,7 @@ final class CommitSession: Identifiable {
         let repo = repository
         let changes = selectedChanges
         let message = GitOperations.message(summary: summary, description: details)
+        let branch = branchLabel
         isCommitting = true
         errorText = nil
         confirmation = nil
@@ -176,7 +184,7 @@ final class CommitSession: Identifiable {
             case .success(let hash):
                 var note = "Committed"
                 if !hash.isEmpty { note += " \(hash)" }
-                if !self.branchLabel.isEmpty { note += " on \(self.branchLabel)" }
+                if !branch.isEmpty { note += " on \(branch)" }
                 self.confirmation = note + "."
                 self.summary = ""
                 self.details = ""
@@ -294,6 +302,8 @@ struct CommitSheet: View {
                         }
                     }
                     .fixedSize()
+                    // The commit and its result belong to the repository it started in.
+                    .disabled(session.isCommitting)
                 } else {
                     Label(session.repository.name, systemImage: "folder")
                         .font(.headline)
@@ -480,6 +490,8 @@ struct CommitSheet: View {
                 Spacer()
                 Button(session.confirmation == nil ? "Cancel" : "Done") { dismiss() }
                     .keyboardShortcut(.cancelAction)
+                    // Closing mid-commit would hide how it ended; the commit itself can't be stopped.
+                    .disabled(session.isCommitting)
                 Button(commitTitle) { session.commit() }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)

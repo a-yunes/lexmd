@@ -104,6 +104,11 @@ final class AppModel {
         didSet { defaults.set(shortcutOverrides, forKey: Keys.shortcuts) }
     }
     var shortcutNote: String?
+    /// The command whose shortcut Settings is recording; at most one at a time.
+    var recordingShortcut: ShortcutAction?
+    @ObservationIgnored var shortcutMonitor: Any?
+    /// The window recording happens in; keys typed in other windows are left alone.
+    @ObservationIgnored weak var shortcutWindow: NSWindow?
     /// The tab Settings shows, kept between launches. Set it before opening Settings to show a
     /// specific tab; see `showSettings(_:using:)` and `SettingsTabButton`.
     var settingsTab = SettingsTab(rawValue: UserDefaults.standard.string(forKey: SettingsTab.defaultsKey) ?? "") ?? .general {
@@ -232,6 +237,21 @@ final class AppModel {
 
     @ObservationIgnored var text = ""
     @ObservationIgnored var savedText = ""
+    /// Counts renders, so the preview can tell whether it shows the latest text.
+    @ObservationIgnored private(set) var renderGeneration = 0
+    /// Counts Copy as Rich Text requests; only the latest writes to the pasteboard.
+    @ObservationIgnored var copyGeneration = 0
+    /// The file version the open document's text was edited from: the text read when it
+    /// opened or was reloaded. Saving doesn't change it, so it tells whether the text already
+    /// contains a rewrite that was on disk when the document was read.
+    @ObservationIgnored var loadedText = ""
+    /// How the open document is stored on disk; saving keeps it.
+    @ObservationIgnored var documentFormat = TextFile.Format.utf8
+    /// The open document's file as LexMD last read or wrote it; a different one on disk means
+    /// another app changed it.
+    @ObservationIgnored var savedStamp: FileStamp?
+    /// A question about the open document's file changing on disk is showing.
+    @ObservationIgnored private var isAskingAboutExternalChange = false
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var renderTask: Task<Void, Never>?
     @ObservationIgnored private var scanTask: Task<Void, Never>?
@@ -296,7 +316,12 @@ final class AppModel {
         compactFolders = defaults.object(forKey: Keys.compactFolders) as? Bool ?? true
         loadsRemoteContent = preview.allowsRemoteContent
         showGitStatus = defaults.object(forKey: Keys.showGitStatus) as? Bool ?? true
-        shortcutOverrides = defaults.dictionary(forKey: Keys.shortcuts) as? [String: String] ?? [:]
+        let stored = defaults.dictionary(forKey: Keys.shortcuts) as? [String: String] ?? [:]
+        let resolved = Self.resolvingShortcutConflicts(stored)
+        shortcutOverrides = resolved.overrides
+        if !resolved.cleared.isEmpty {
+            shortcutNote = "Shortcuts you chose replaced the defaults of \(resolved.cleared.map(\.title).joined(separator: ", "))."
+        }
         recentFiles = defaults.stringArray(forKey: Keys.recentFiles) ?? []
         sidebarPosition = SidebarPosition(rawValue: defaults.string(forKey: Keys.sidebarPosition) ?? "") ?? .left
         appearanceMode = AppearanceMode(rawValue: defaults.string(forKey: Keys.appearance) ?? "") ?? .system
@@ -322,7 +347,11 @@ final class AppModel {
             self.preview.scroll(to: fraction)
         }
         preview.onOpenURL = { [weak self] url in self?.openLink(url) }
-        preview.onHighlightCount = { [weak self] count in self?.highlightCountChanged(count) }
+        preview.onHighlightCount = { [weak self] count, document in
+            // A count from a page still showing the previous document says nothing about this one.
+            guard let self, document == self.currentFile?.path else { return }
+            self.highlightCountChanged(count)
+        }
         preview.onPinch = { [weak self] steps in self?.zoom(by: steps) }
         applyFontScale()
         setUpLinks()
@@ -472,7 +501,8 @@ final class AppModel {
     /// Opens a folder (as the sidebar root) or a Markdown file.
     /// Opens a project folder, or a document (with its folder when it is outside the project).
     /// `placement` and `recordsHistory` apply to a document; see `showDocument(_:placement:recordsHistory:)`.
-    func open(_ url: URL, placement: DocumentPlacement = .reuseTab, recordsHistory: Bool = true) {
+    /// `then` runs once it has opened, which may be after a question about unsaved text.
+    func open(_ url: URL, placement: DocumentPlacement = .reuseTab, recordsHistory: Bool = true, then: (() -> Void)? = nil) {
         let path = FileScanner.canonicalPath(url.path)
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { return }
@@ -481,11 +511,14 @@ final class AppModel {
         let newRoot = isDirectory ? path : (inside ? nil : (path as NSString).deletingLastPathComponent)
         guard let newRoot, let root = rootURL?.path, newRoot != root else {
             finishOpening(path, isDirectory: isDirectory, placement: placement, recordsHistory: recordsHistory)
+            then?()
             return
         }
         // Opening another project closes these tabs: text that can't be saved is never dropped.
         settleUnsavedText(before: "open another project") { [weak self] proceed in
-            if proceed { self?.finishOpening(path, isDirectory: isDirectory, placement: placement, recordsHistory: recordsHistory) }
+            guard proceed, let self else { return }
+            self.finishOpening(path, isDirectory: isDirectory, placement: placement, recordsHistory: recordsHistory)
+            then?()
         }
     }
 
@@ -509,6 +542,11 @@ final class AppModel {
         if rootURL?.path != normalized.path {
             saveNow()
             closeTabsForProjectChange()
+            // Nothing that belongs to the previous project carries over: its repositories and
+            // commit sheet, and undo of file operations made in it.
+            git.projectClosed()
+            fileUndoManager?.removeAllActions(withTarget: self)
+            sidebarFiles.pendingLinkUpdates = [:]
             rootURL = normalized
             tree = []
             filter = ""
@@ -601,6 +639,11 @@ final class AppModel {
         }
         for event in events {
             if event.path == current { currentChanged = true }
+            // Events were dropped below this folder, so the open document may have changed unseen.
+            if Int(event.flags) & kFSEventStreamEventFlagMustScanSubDirs != 0, let current,
+               current.hasPrefix(event.path.hasSuffix("/") ? event.path : event.path + "/") {
+                currentChanged = true
+            }
             if !structural, FileScanner.eventChangesTree(path: event.path, flags: event.flags, root: root, paths: paths) {
                 structural = true
             }
@@ -675,8 +718,38 @@ final class AppModel {
             recentFiles = remappedRecent
             defaults.set(recentFiles, forKey: Keys.recentFiles)
         }
+        let mapped = Set(tabStore.list.tabs.filter { move.map($0.path) != nil }.map(\.id))
         tabStore.list.remap { move.map($0) }
+        closeTabsReplacedByMove(mapped)
         persistTabs()
+    }
+
+    /// A move onto the path of a tab whose file was gone (its tab still open) leaves two tabs for
+    /// one file. The moved document is the file now there, so the stale tab closes; text it held
+    /// that never reached the disk is offered to be kept elsewhere.
+    private func closeTabsReplacedByMove(_ mapped: Set<UUID>) {
+        let movedPaths = Set(tabStore.list.tabs.filter { mapped.contains($0.id) }.map(\.path))
+        let stale = tabStore.list.tabs.filter { !mapped.contains($0.id) && movedPaths.contains($0.path) }
+        guard !stale.isEmpty else { return }
+        var unsaved: [(path: String, text: String)] = []
+        for tab in stale {
+            if tab.id == tabStore.list.activeID {
+                if text != savedText { unsaved.append((tab.path, text)) }
+                savedText = text
+                if let moved = tabStore.list.tabs.first(where: { mapped.contains($0.id) && $0.path == tab.path }) {
+                    tabStore.list.close(tab.id, remember: false)
+                    tabStore.list.activate(moved.id)
+                    showActiveTab()
+                    continue
+                }
+            } else if let text = tab.state.unsavedText {
+                unsaved.append((tab.path, text))
+            }
+            tabStore.list.close(tab.id, remember: false)
+        }
+        if !unsaved.isEmpty {
+            Self.keepUnsavedElsewhere(unsaved, { Self.unreadableDocumentAlert(documents: unsaved) }) {}
+        }
     }
 
     /// Text that is not on disk: the open document's edits and tabs whose saves failed.
@@ -694,15 +767,18 @@ final class AppModel {
     func writeUnsaved(_ documents: [(path: String, text: String)], through move: PathMove) -> [(path: String, text: String)] {
         documents.filter { document in
             guard let target = move.map(document.path) else { return true }
-            return (try? document.text.write(toFile: target, atomically: false, encoding: .utf8)) == nil
+            return (try? TextFile.writeKeepingFormat(document.text, toPath: target)) == nil
         }
     }
 
     /// Closes a project whose folder is gone, first offering to save `documents` elsewhere.
     private func closeProjectKeeping(_ documents: [(path: String, text: String)], name: String) {
         guard !documents.isEmpty else { closeProject(); return }
+        let root = rootURL
         Self.keepUnsavedElsewhere(documents, { Self.missingProjectAlert(name: name, documents: documents) }) { [weak self] in
-            self?.closeProject()
+            // Another project may have been opened while the question showed; it stays open.
+            guard let self, self.rootURL == root else { return }
+            self.closeProject()
         }
     }
 
@@ -785,6 +861,8 @@ final class AppModel {
     private func closeProject() {
         savedText = text
         closeTabsForProjectChange()
+        fileUndoManager?.removeAllActions(withTarget: self)
+        sidebarFiles.pendingLinkUpdates = [:]
         watcher = nil
         scanTask?.cancel()
         scanTask = nil
@@ -845,13 +923,17 @@ final class AppModel {
     /// Forward, and for a tab's own document, whose history the tab restores.
     func load(_ url: URL, recordsHistory: Bool = true) {
         saveNow()
-        guard let content = Self.read(url) else {
+        guard let file = TextFile.read(url) else {
             NSSound.beep()
             return
         }
+        let content = file.text
         currentFile = url
         text = content
         savedText = content
+        loadedText = content
+        documentFormat = file.format
+        savedStamp = FileStamp(url)
         saveError = nil
         if !isFindBarVisible {
             transientHighlight = false
@@ -867,10 +949,6 @@ final class AppModel {
         defaults.set(url.path, forKey: Keys.lastFile)
         recordVisit(url.path, recordsHistory: recordsHistory)
         tabDidLoad(url)
-    }
-
-    private static func read(_ url: URL) -> String? {
-        DocumentText.read(url)
     }
 
     private func textDidChange(_ newText: String) {
@@ -891,15 +969,24 @@ final class AppModel {
 
     func saveNow() {
         saveTask?.cancel()
-        guard currentFile != nil, text != savedText else { return }
+        guard currentFile != nil, text != savedText else {
+            // Back to the text on disk, as after an undo: nothing is left unsaved.
+            if saveError != nil { saveError = nil }
+            return
+        }
         // Another app may have moved the file since the last event: follow it rather than
         // recreating it here.
         if let path = currentFile?.path, !FileManager.default.fileExists(atPath: path) { followMovedDocuments() }
         guard let url = currentFile, !sidebarFiles.isTrashing(url.path) else { return }
+        if let disk = changedOnDisk(url) {
+            askAboutExternalChange(disk)
+            return
+        }
         do {
             // Write in place so file watchers see a modification rather than a replace.
-            try text.write(to: url, atomically: false, encoding: .utf8)
+            try TextFile.writeInPlace(text, to: url, as: documentFormat)
             savedText = text
+            savedStamp = FileStamp(url)
             if saveError != nil { saveError = nil }
             if isCurrentDocumentMissing { updateMissingDocuments() }
             git.documentSaved()
@@ -909,17 +996,85 @@ final class AppModel {
     }
 
     private func reloadFromDiskIfNeeded() {
-        guard let url = currentFile, let disk = Self.read(url), disk != savedText else { return }
-        guard text == savedText else { return } // Local edits win; autosave will write them.
-        text = disk
-        savedText = disk
-        editor.replaceText(disk)
+        guard let url = currentFile, let disk = TextFile.read(url), disk.text != savedText else { return }
+        guard text == savedText else {
+            // Both changed: ask before either version is lost.
+            askAboutExternalChange(disk)
+            return
+        }
+        useVersionOnDisk(disk, of: url)
+    }
+
+    private func useVersionOnDisk(_ disk: TextFile, of url: URL) {
+        text = disk.text
+        savedText = disk.text
+        loadedText = disk.text
+        documentFormat = disk.format
+        savedStamp = FileStamp(url)
+        if saveError != nil { saveError = nil }
+        editor.replaceText(disk.text)
         if isFindBarVisible { refreshFind(scroll: false) }
         render(debounce: false)
     }
 
+    /// LexMD itself rewrote these files, as a link update and its undo do. For the open
+    /// document that version is known, so it isn't taken for another app's change.
+    func acceptOwnWrites(_ paths: [String]) {
+        guard let url = currentFile, paths.contains(url.path), let disk = TextFile.read(url) else { return }
+        if text == savedText {
+            useVersionOnDisk(disk, of: url)
+        } else {
+            savedText = disk.text
+            loadedText = disk.text
+            documentFormat = disk.format
+            savedStamp = FileStamp(url)
+        }
+    }
+
+    /// The file's text when another app changed it since LexMD last read or wrote it.
+    private func changedOnDisk(_ url: URL) -> TextFile? {
+        guard let savedStamp, FileStamp(url) != savedStamp, let disk = TextFile.read(url), disk.text != savedText else { return nil }
+        return disk
+    }
+
+    /// Another app changed the open document while it had unsaved edits. Nothing is written
+    /// until the user picks a version.
+    private func askAboutExternalChange(_ disk: TextFile) {
+        guard !isAskingAboutExternalChange, let url = currentFile else { return }
+        isAskingAboutExternalChange = true
+        saveError = "Changed by another app"
+        Self.askAboutExternalChange(url.lastPathComponent) { [weak self] keepMine in
+            guard let self else { return }
+            self.isAskingAboutExternalChange = false
+            guard self.currentFile == url else { return }
+            if keepMine {
+                // Writing over the other version is now intended.
+                self.savedStamp = FileStamp(url)
+                self.savedText = TextFile.read(url)?.text ?? self.savedText
+                self.saveNow()
+            } else if let latest = TextFile.read(url) {
+                self.useVersionOnDisk(latest, of: url)
+            }
+        }
+    }
+
+    /// Asks whether to keep LexMD's edits or the version another app saved; `true` keeps
+    /// LexMD's. Replaced in tests.
+    static var askAboutExternalChange: (_ name: String, _ reply: @escaping (Bool) -> Void) -> Void = { name, reply in
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "“\(name)” was changed by another app"
+        alert.informativeText = "It has edits in LexMD that aren’t saved yet. Keep your edits to save them over the other version, or use the other version and lose your edits."
+        alert.addButton(withTitle: "Keep My Edits")
+        alert.addDestructiveButton("Use Other Version")
+        AppModel.shared.present(alert) { reply($0 == .alertFirstButtonReturn) }
+    }
+
     func render(debounce: Bool) {
         renderTask?.cancel()
+        renderGeneration += 1
+        let generation = renderGeneration
+        let document = currentFile?.path
         let source = text
         let base = currentFile?.deletingLastPathComponent()
         let links = linkContext(for: source)
@@ -936,19 +1091,20 @@ final class AppModel {
             let reset = self.pendingScrollReset
             self.pendingScrollReset = false
             self.preview.setDocumentTitle(self.currentFile == nil ? "" : self.title)
-            self.preview.render(html: html, baseURL: base, resetScroll: reset)
+            self.preview.render(html: html, baseURL: base, resetScroll: reset, document: document, generation: generation)
             if self.wordCount != words { self.wordCount = words }
         }
     }
 
     // MARK: - View settings
 
-    func setViewMode(_ mode: ViewMode) {
+    /// `focusesEditor` is false when the find bar keeps focus, as when Replace shows the source.
+    func setViewMode(_ mode: ViewMode, focusesEditor: Bool = true) {
         guard viewMode != mode else { return }
         viewMode = mode
         defaults.set(mode.rawValue, forKey: Keys.viewMode)
         if isFindBarVisible { refreshFind(scroll: false) }
-        if mode != .read { editor.whenVisible { [weak self] in self?.editor.focus() } }
+        if mode != .read, focusesEditor { editor.whenVisible { [weak self] in self?.editor.focus() } }
     }
 
     func zoom(by step: Int) {
@@ -991,8 +1147,10 @@ final class AppModel {
             index += step
         }
         guard index >= 0, index < history.count else { NSSound.beep(); return }
-        historyIndex = index
-        open(URL(fileURLWithPath: history[index]), placement: .active, recordsHistory: false)
+        let target = history[index]
+        open(URL(fileURLWithPath: target), placement: .active, recordsHistory: false)
+        // Moved only once the document shows: a file that can't be read leaves Back where it was.
+        if currentFile?.path == target, history.indices.contains(index), history[index] == target { historyIndex = index }
     }
 
     func toggleSidebar() {
@@ -1035,5 +1193,19 @@ final class AppModel {
     func completeOnboarding() {
         defaults.set(true, forKey: Keys.onboardingComplete)
         isOnboardingPresented = false
+    }
+}
+
+/// A file's modification date and size, to notice changes made by other apps.
+struct FileStamp: Equatable {
+    var modified: Date
+    var size: Int
+
+    init?(_ url: URL) {
+        // Read the file system each time: URL resource values are cached per URL.
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let modified = attributes[.modificationDate] as? Date else { return nil }
+        self.modified = modified
+        size = (attributes[.size] as? NSNumber)?.intValue ?? 0
     }
 }

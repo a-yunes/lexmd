@@ -4,7 +4,7 @@ import Observation
 /// Find bar state remembered per tab.
 struct TabFindState: Equatable {
     var query: String
-    var caseSensitive: Bool
+    var options: SearchOptions
     var index: Int
 }
 
@@ -18,6 +18,8 @@ struct TabViewState: Equatable {
     var find: TabFindState?
     /// Text that could not be saved when the tab was left, so it is never lost.
     var unsavedText: String?
+    /// The version of the file that `unsavedText` was edited from.
+    var unsavedBase: String?
 }
 
 struct DocumentTab: Identifiable, Equatable {
@@ -123,6 +125,16 @@ struct TabList: Equatable {
     mutating func update(_ id: UUID, _ body: (inout DocumentTab) -> Void) {
         guard let index = index(of: id) else { return }
         body(&tabs[index])
+    }
+
+    /// Updates a tab whether it is open or was just closed, for state that arrives after the
+    /// tab closed, such as its preview position.
+    mutating func updateOpenOrClosed(_ id: UUID, _ body: (inout DocumentTab) -> Void) {
+        if let index = index(of: id) {
+            body(&tabs[index])
+        } else if let index = closed.lastIndex(where: { $0.tab.id == id }) {
+            body(&closed[index].tab)
+        }
     }
 
     /// Rewrites paths after a rename or move, in open tabs, their history, and closed tabs.

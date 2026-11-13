@@ -46,6 +46,42 @@ struct PreviewLoadingTests {
         #expect(later)
     }
 
+    /// A reload, such as turning on remote content or recovering from a crash, keeps the
+    /// reader's place instead of jumping to the top.
+    @Test func reloadKeepsTheScrollPosition() async throws {
+        let (preview, window) = makePreview()
+        defer { window.contentView = nil }
+        let long = (0..<200).map { "<p>Paragraph \($0)</p>" }.joined(separator: "\n")
+        preview.render(html: long, baseURL: nil, resetScroll: true, document: "/doc.md", generation: 1)
+        try await waitUntil(seconds: 10) { try await page(preview, "return document.querySelectorAll('#content p').length") as? Int == 200 }
+        preview.scroll(to: 0.6)
+        try await Task.sleep(for: .milliseconds(400))
+        preview.setAllowsRemoteContent(true)
+        try await waitUntil(seconds: 10) {
+            guard preview.isPageLoaded else { return false }
+            return try await page(preview, "return window.scrollY > 0") as? Bool == true
+        }
+        let fraction = try #require(try await page(preview, "return window.scrollY / (document.documentElement.scrollHeight - window.innerHeight)") as? Double)
+        #expect(abs(fraction - 0.6) < 0.05)
+        #expect(preview.shows("/doc.md", generation: 1))
+    }
+
+    /// Content that keeps ending the page's process stops reloading after three crashes, and the
+    /// next render tries again.
+    @Test func repeatedCrashesStopReloading() async throws {
+        let (preview, window) = makePreview()
+        defer { window.contentView = nil }
+        try await waitUntil { preview.isPageLoaded }
+        for _ in 0..<4 { preview.webViewWebContentProcessDidTerminate(preview.webView) }
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(!preview.isPageLoaded, "the fourth crash in a minute stops the reloads")
+        preview.render(html: "<h1>Again</h1>", baseURL: nil, resetScroll: true)
+        try await waitUntil(seconds: 10) {
+            guard preview.isPageLoaded else { return false }
+            return try await page(preview, "return document.querySelector('#content h1') !== null") as? Bool == true
+        }
+    }
+
     @Test func scrollPositionWaitsForTheNextDocument() async throws {
         let (preview, window) = makePreview()
         defer { window.contentView = nil }
