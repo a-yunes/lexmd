@@ -652,6 +652,74 @@ struct OutlineLinkTests {
         #expect(reported.last?.hasPrefix("h2") == true)
     }
 
+    /// A resize reflows the page, but the block at the top stays put and the heading in view
+    /// does not change while the window resizes.
+    @Test func previewKeepsItsPlaceWhileResizing() async throws {
+        let preview = PreviewController(allowsRemoteContent: false)
+        var reported: [String] = []
+        preview.onHeadingChange = { reported.append($0) }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = preview.webView
+        defer { window.contentView = nil }
+
+        let paragraph = "<p>" + String(repeating: "A sentence long enough to wrap differently at another width. ", count: 8) + "</p>\n"
+        var html = ""
+        for i in 0..<30 { html += "<h2 id=\"h\(i)\">Heading \(i)</h2>\n" + String(repeating: paragraph, count: 3) }
+        preview.render(html: html, baseURL: nil, resetScroll: true)
+        try await waitUntil { reported.last == "h0" }
+
+        func top(_ id: String) async throws -> Double {
+            try await preview.webView.callAsyncJavaScript(
+                "return document.getElementById(id).getBoundingClientRect().top", arguments: ["id": id], in: nil, contentWorld: .page
+            ) as? Double ?? .nan
+        }
+        _ = try await preview.webView.callAsyncJavaScript(
+            "window.scrollTo(0, window.scrollY + document.getElementById('h12').getBoundingClientRect().top - 10)",
+            arguments: [:], in: nil, contentWorld: .page
+        )
+        try await waitUntil { reported.last == "h12" }
+        let before = try await top("h12")
+        let count = reported.count
+
+        for width in stride(from: 880.0, through: 520, by: -40) {
+            window.setContentSize(NSSize(width: width, height: 600))
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        let after = try await top("h12")
+        #expect(abs(after - before) < 2)
+        #expect(reported.count == count)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(reported.last == "h12")
+    }
+
+    /// A resize reflows the editor's text without the reader scrolling, so neither the preview nor
+    /// the outline follows it; a real scroll still does.
+    @Test func editorResizeIsNotAScroll() async throws {
+        let editor = EditorController()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = editor.scrollView
+        defer { window.contentView = nil }
+        editor.load(String(repeating: "A line of text that wraps at narrower widths and moves the scroll fraction along. ", count: 400))
+        window.layoutIfNeeded()
+        editor.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 2000))
+        var scrolls = 0, moves = 0
+        editor.onScroll = { _ in scrolls += 1 }
+        editor.onVisibleTextMove = { moves += 1 }
+        for width in stride(from: 860.0, through: 500, by: -40) {
+            window.setContentSize(NSSize(width: width, height: 600))
+            window.layoutIfNeeded()
+            // The reflow moves the origin to keep the text in view, as TextKit does on screen.
+            let clip = editor.scrollView.contentView
+            clip.scroll(to: NSPoint(x: 0, y: clip.bounds.origin.y + 7))
+            await Task.yield()
+        }
+        #expect(scrolls == 0 && moves == 0)
+        try await Task.sleep(for: .milliseconds(50))
+        editor.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 2400))
+        #expect(scrolls == 1)
+        #expect(moves == 1)
+    }
+
     /// Revealing a heading far down a long document puts its line at the top of the editor on the
     /// first try, without scrolling the preview along by fraction.
     /// Right after a document loads, the line at the top of the editor is its first line, even

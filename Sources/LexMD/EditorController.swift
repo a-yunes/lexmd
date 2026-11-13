@@ -40,6 +40,11 @@ final class EditorController: NSObject, NSTextViewDelegate {
 
     var onTextChange: ((String) -> Void)?
     var onScroll: ((CGFloat) -> Void)?
+    /// Called when the reader moves the text in view, including quiet scrolls. A resize is not
+    /// a move: the text reflows under a fixed origin and settles once the resize ends.
+    var onVisibleTextMove: (() -> Void)?
+    /// True from a resize of the visible area until the run loop turns, while the text reflows.
+    private var isSettlingResize = false
     /// Set while code scrolls to a place the preview reveals by itself, so `onScroll` stays quiet.
     var isScrollingQuietly = false
     /// Returns true when it handled Escape.
@@ -129,6 +134,10 @@ final class EditorController: NSObject, NSTextViewDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(boundsDidChange(_:)),
             name: NSView.boundsDidChangeNotification, object: scrollView.contentView
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(clipFrameDidChange(_:)),
+            name: NSView.frameDidChangeNotification, object: scrollView.contentView
         )
         NotificationCenter.default.addObserver(
             self, selector: #selector(storageDidProcessEditing(_:)),
@@ -366,7 +375,16 @@ final class EditorController: NSObject, NSTextViewDelegate {
         return true
     }
 
+    @objc private func clipFrameDidChange(_ notification: Notification) {
+        isSettlingResize = true
+        DispatchQueue.main.async { [weak self] in self?.isSettlingResize = false }
+    }
+
     @objc private func boundsDidChange(_ notification: Notification) {
+        // Each resize step reflows the text and changes the scroll fraction without the reader
+        // scrolling; following it would jump the preview and the outline on every step.
+        guard !isSettlingResize, !scrollView.inLiveResize else { return }
+        onVisibleTextMove?()
         guard !isScrollingQuietly, let document = scrollView.documentView else { return }
         let clip = scrollView.contentView.bounds
         let insets = scrollView.contentInsets

@@ -144,6 +144,19 @@ enum PreviewTemplate {
   indicator.id = 'lexmd-scroll';
   document.body.appendChild(indicator);
   var hideTimer = null;
+  // A resize reflows the page under a fixed scroll offset. Until it settles, the page keeps the
+  // block that was at the top in place, and scroll events from the reflow are not the reader's.
+  var resizing = false, resizeTimer = null, anchor = null;
+  function captureAnchor() {
+    anchor = null;
+    if (window.scrollY <= 0) return;
+    var blocks = content.children, lo = 0, hi = blocks.length - 1, found = -1;
+    while (lo <= hi) {
+      var mid = (lo + hi) >> 1;
+      if (blocks[mid].getBoundingClientRect().bottom > 0) { found = mid; hi = mid - 1; } else lo = mid + 1;
+    }
+    if (found >= 0) anchor = { el: blocks[found], offset: blocks[found].getBoundingClientRect().top };
+  }
   function updateIndicator() {
     var view = window.innerHeight, total = document.documentElement.scrollHeight;
     if (total <= view + 1) { indicator.classList.remove('visible'); return false; }
@@ -154,17 +167,28 @@ enum PreviewTemplate {
     return true;
   }
   window.addEventListener('scroll', function () {
+    if (resizing) { updateIndicator(); return; }
     if (!updateIndicator()) return;
     indicator.classList.add('visible');
     clearTimeout(hideTimer);
     hideTimer = setTimeout(function () { indicator.classList.remove('visible'); }, 900);
   }, { passive: true });
-  window.addEventListener('resize', updateIndicator);
+  window.addEventListener('resize', function () {
+    resizing = true;
+    if (anchor && anchor.el.isConnected) {
+      var y = Math.round(window.scrollY + anchor.el.getBoundingClientRect().top - anchor.offset);
+      if (y !== Math.round(window.scrollY)) window.scrollTo(0, y);
+    }
+    updateIndicator();
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () { resizing = false; queueSpy(); }, 200);
+  });
 
   window.lexmdScroll = function (f) {
     spyPin = null;
     var max = document.documentElement.scrollHeight - window.innerHeight;
     if (max > 0) window.scrollTo(0, Math.round(max * f));
+    captureAnchor();
   };
 
   window.lexmdZoom = function (s) {
@@ -215,9 +239,11 @@ enum PreviewTemplate {
     window.webkit.messageHandlers.lexmd.postMessage({ type: 'heading', id: id });
   }
   function queueSpy() {
-    if (spyTimer) return;
+    if (spyTimer || resizing) return;
     spyTimer = setTimeout(function () {
       spyTimer = null;
+      if (resizing) return;
+      captureAnchor();
       if (spyPin) {
         var arrived = Math.abs(window.scrollY - spyPin.y) <= 2;
         if (arrived) spyPin.arrived = true;
@@ -228,7 +254,6 @@ enum PreviewTemplate {
     }, 60);
   }
   window.addEventListener('scroll', queueSpy, { passive: true });
-  window.addEventListener('resize', queueSpy);
   new MutationObserver(queueSpy).observe(content, { childList: true });
   window.lexmdReveal = function (id, smooth) {
     var target = document.getElementById(id);
@@ -237,6 +262,7 @@ enum PreviewTemplate {
     var max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
     var y = Math.round(Math.min(max, Math.max(0, window.scrollY + target.getBoundingClientRect().top - margin)));
     spyPin = { id: id, y: y, until: Date.now() + 1500, arrived: false };
+    anchor = y > 0 ? { el: target, offset: target.getBoundingClientRect().top - (y - window.scrollY) } : null;
     window.scrollTo({ top: y, behavior: scrollBehavior(smooth) });
     reportHeading(id);
     return true;

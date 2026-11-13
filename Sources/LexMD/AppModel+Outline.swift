@@ -213,10 +213,16 @@ extension AppModel {
     func setUpLinks() {
         preview.onHeadingChange = { [weak self] id in self?.previewHeadingChanged(id) }
         outline.index.onUpdate = { [weak self] previous in self?.linkIndexDidUpdate(from: previous) }
+        editor.onVisibleTextMove = { [weak self] in self?.editorDidScroll() }
+        // The heading in view is left alone while the window resizes, then settles once.
         outline.observers.append(NotificationCenter.default.addObserver(
-            forName: NSView.boundsDidChangeNotification, object: editor.scrollView.contentView, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.editorDidScroll() }
+            forName: NSWindow.didEndLiveResizeNotification, object: nil, queue: .main
+        ) { [weak self] notification in
+            MainActor.assumeIsolated {
+                guard let self, let window = notification.object as? NSWindow,
+                      window === self.editor.scrollView.window else { return }
+                self.settleCurrentHeadingAfterResize()
+            }
         })
         let completion = EditorCompletion(textView: editor.textView)
         completion.isEnabled = { [weak self] in self?.suggestsLinks ?? false }
@@ -364,6 +370,13 @@ extension AppModel {
 
     private func editorDidScroll() {
         guard isOutlineVisible, viewMode != .read, currentFile != nil else { return }
+        outline.lastEditorScroll = Date()
+        outline.setCurrentHeading(outline.heading(atLocation: editor.topVisibleLocation()))
+    }
+
+    func settleCurrentHeadingAfterResize() {
+        guard isOutlineVisible, currentFile != nil, viewMode != .read else { return }
+        // In split view the editor leads, so the preview's own report after the resize waits.
         outline.lastEditorScroll = Date()
         outline.setCurrentHeading(outline.heading(atLocation: editor.topVisibleLocation()))
     }
