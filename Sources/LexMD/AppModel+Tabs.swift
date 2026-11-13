@@ -420,23 +420,6 @@ extension AppModel {
     }
 }
 
-extension EditorController {
-    /// Puts back a remembered caret, selection, and scroll position.
-    func restore(selection: NSRange, origin: CGPoint?) {
-        let length = (textView.string as NSString).length
-        let location = min(selection.location, length)
-        textView.setSelectedRange(NSRange(location: location, length: min(selection.length, length - location)))
-        let clip = scrollView.contentView
-        guard let origin else { return }
-        if origin.y > clip.bounds.height, let layout = textView.textLayoutManager {
-            layout.ensureLayout(for: layout.documentRange)
-        }
-        let target = clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin
-        clip.scroll(to: target)
-        scrollView.reflectScrolledClipView(clip)
-    }
-}
-
 /// Where `showDocument(_:placement:recordsHistory:)` puts a document.
 enum DocumentPlacement {
     /// Switch to the tab that already shows it, or load it in the active tab.

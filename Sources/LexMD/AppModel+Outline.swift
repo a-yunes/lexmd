@@ -447,14 +447,8 @@ extension AppModel {
 
     /// Selects a broken link in the editor, showing the editor if needed.
     func selectProblem(_ problem: LinkProblem) {
-        guard viewMode == .read else {
-            editor.reveal(problem.range, indicator: true, select: true)
-            editor.focus()
-            return
-        }
-        setViewMode(.split)
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(120))
+        if viewMode == .read { setViewMode(.split) }
+        editor.whenVisible { [weak self] in
             self?.editor.reveal(problem.range, indicator: true, select: true)
             self?.editor.focus()
         }
@@ -577,55 +571,3 @@ extension AppModel {
     }
 }
 
-extension EditorController {
-    /// Moves the caret to a location and scrolls its line to the top of the editor. The preview is
-    /// not scrolled along, since callers reveal the same place in it precisely.
-    func revealAtTop(_ location: Int) {
-        let length = (textView.string as NSString).length
-        let range = NSRange(location: min(max(location, 0), length), length: 0)
-        isScrollingQuietly = true
-        defer { isScrollingQuietly = false }
-        textView.setSelectedRange(range)
-        guard textView.window != nil, let lineTop = lineTop(at: range.location) else {
-            textView.scrollRangeToVisible(range)
-            return
-        }
-        let clip = scrollView.contentView
-        let top = scrollView.contentInsets.top
-        let maxY = max(-top, textView.frame.height - clip.bounds.height)
-        clip.scroll(to: NSPoint(x: 0, y: min(max(lineTop - top - 12, -top), maxY)))
-        scrollView.reflectScrolledClipView(clip)
-    }
-
-    /// The top of the line at a location in text view coordinates. The text before it is laid out
-    /// first: estimated heights would put the line too high or too low. (The text view's
-    /// `firstRect` is no help here: it is empty for text outside the visible area.)
-    func lineTop(at location: Int) -> CGFloat? {
-        guard let layout = textView.textLayoutManager, let content = layout.textContentManager else { return nil }
-        let start = layout.documentRange.location
-        guard let target = content.location(start, offsetBy: location),
-              let before = NSTextRange(location: start, end: target) else { return nil }
-        layout.ensureLayout(for: before)
-        guard let fragment = layout.textLayoutFragment(for: target) else { return nil }
-        let lineOffset = fragment.textLineFragment(for: target, isUpstreamAffinity: false)?.typographicBounds.minY ?? 0
-        return textView.textContainerOrigin.y + fragment.layoutFragmentFrame.minY + lineOffset
-    }
-
-    /// The text location at the top of the visible editor area.
-    /// Asks the layout manager rather than `characterIndexForInsertion`, which answers with the end
-    /// of the text while the visible part is not laid out yet, as right after a document loads.
-    func topVisibleLocation() -> Int {
-        let bounds = scrollView.contentView.bounds
-        let point = NSPoint(x: textView.textContainerInset.width + 4, y: bounds.minY + scrollView.contentInsets.top + 24)
-        guard let layout = textView.textLayoutManager, let content = layout.textContentManager else {
-            return textView.characterIndexForInsertion(at: point)
-        }
-        let origin = textView.textContainerOrigin
-        let inContainer = CGPoint(x: point.x - origin.x, y: max(0, point.y - origin.y))
-        layout.ensureLayout(for: CGRect(x: 0, y: inContainer.y, width: 1, height: 1))
-        guard let fragment = layout.textLayoutFragment(for: inContainer) else {
-            return textView.characterIndexForInsertion(at: point)
-        }
-        return content.offset(from: layout.documentRange.location, to: fragment.rangeInElement.location)
-    }
-}

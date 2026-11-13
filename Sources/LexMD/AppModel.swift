@@ -948,12 +948,7 @@ final class AppModel {
         viewMode = mode
         defaults.set(mode.rawValue, forKey: Keys.viewMode)
         if isFindBarVisible { refreshFind(scroll: false) }
-        if mode != .read {
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: 50_000_000)
-                self?.editor.focus()
-            }
-        }
+        if mode != .read { editor.whenVisible { [weak self] in self?.editor.focus() } }
     }
 
     func zoom(by step: Int) {

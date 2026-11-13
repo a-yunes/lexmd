@@ -272,6 +272,37 @@ struct EditorFeatureTests {
         #expect(harness.text == "Text\n\n|a|b|c\n|:-|-:|:-:|\n|longer|x|\n|1|2|3|4\n\nAfter")
     }
 
+    /// Revealing a line far down a long document centers it on the first try, though the text
+    /// between was never on screen.
+    @Test func revealCentersADistantLine() {
+        var text = ""
+        for i in 0..<400 { text += "Line \(i) with enough words to wrap now and then in the editor window.\n\n" }
+        let harness = Harness(text)
+        harness.window.layoutIfNeeded()
+        let range = (text as NSString).range(of: "Line 333 ")
+        harness.editor.reveal(range, indicator: false, select: true)
+        let clip = harness.editor.scrollView.contentView.bounds
+        let line = harness.editor.lineFrame(at: range.location)
+        #expect(line.map { abs($0.midY - clip.midY) < 2 } == true)
+        #expect(harness.selection == range)
+    }
+
+    /// Work that needs the editor on screen waits while a view mode hides it, and runs once it is
+    /// shown again; the latest request wins. On screen, it runs at once.
+    @Test func editorWorkWaitsUntilTheEditorIsShown() async throws {
+        let harness = Harness("Text")
+        var ran: [String] = []
+        harness.editor.whenVisible { ran.append("now") }
+        #expect(ran == ["now"])
+        harness.editor.scrollView.isHidden = true
+        harness.editor.whenVisible { ran.append("stale") }
+        harness.editor.whenVisible { ran.append("latest") }
+        #expect(ran == ["now"])
+        harness.editor.scrollView.isHidden = false
+        try await waitUntil { ran.count == 2 }
+        #expect(ran == ["now", "latest"])
+    }
+
     /// Undoing a table edit reaches the model as well as the text view, so autosave never keeps
     /// the text from before the undo.
     @Test func undoingATableEditTellsTheModel() async throws {

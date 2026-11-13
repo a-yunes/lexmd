@@ -161,21 +161,12 @@ extension EditorController {
         let screenRect = textView.firstRect(forCharacterRange: caret, actualRange: nil)
         guard screenRect != .zero else { return }
         let rect = textView.convert(window.convertFromScreen(screenRect), from: nil)
-        let clip = scrollView.contentView
-        let y = Self.centeredOffset(
-            caretMidY: rect.midY, visibleHeight: clip.bounds.height,
-            documentHeight: textView.frame.height, topInset: scrollView.contentInsets.top
-        )
-        guard abs(clip.bounds.origin.y - y) > 0.5 else { return }
-        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
-        scrollView.reflectScrolledClipView(clip)
+        scroll(toY: rect.midY - scrollView.contentView.bounds.height / 2)
     }
 
     /// The scroll offset that centers `caretMidY`, clamped to the scrollable range.
     static func centeredOffset(caretMidY: CGFloat, visibleHeight: CGFloat, documentHeight: CGFloat, topInset: CGFloat) -> CGFloat {
-        let minY = -topInset
-        let maxY = max(minY, documentHeight - visibleHeight)
-        return min(max((caretMidY - visibleHeight / 2).rounded(), minY), maxY)
+        clampedOffset(caretMidY - visibleHeight / 2, visibleHeight: visibleHeight, documentHeight: documentHeight, topInset: topInset)
     }
 
     // MARK: Spelling and grammar

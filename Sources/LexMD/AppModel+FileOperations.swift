@@ -158,7 +158,7 @@ extension AppModel {
     private func startWritingNewDocument() {
         guard currentFile != nil else { return }
         if viewMode == .read { setViewMode(.split) }
-        editor.focus()
+        editor.whenVisible { [weak self] in self?.editor.focus() }
     }
 
     // MARK: Move
