@@ -283,7 +283,7 @@ struct EditorFeatureTests {
         #expect(reported != nil && reported != original)
         harness.undo()
         #expect(harness.text == original)
-        try await waitUntil(seconds: 2) { reported == original }
+        try await waitUntil { reported == original }
     }
 
     @Test func formatTableUsesDisplayWidth() {
