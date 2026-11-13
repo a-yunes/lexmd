@@ -56,46 +56,19 @@ package struct QuickLookPage {
             let shown = ByteCountFormatter.string(fromByteCount: Int64(maxInputBytes), countStyle: .file)
             note = "<p class=\"lexmd-ql-note\">This file is \(total). Quick Look shows the first \(shown); open it in LexMD to read the rest.</p>\n"
         }
-        let title = MarkdownHTML.escape(fileURL.lastPathComponent)
-        let html = """
-        <!doctype html>
-        <html lang="\(MarkdownHTML.languageTag())">
-        <head>
-        <meta charset="utf-8">
-        <meta http-equiv="Content-Security-Policy" content="\(contentSecurityPolicy)">
-        <meta name="color-scheme" content="light dark">
-        <title>\(title)</title>
-        <style>
-        \(PreviewStyle.page)
-        </style>
-        <style>
-        \(PreviewStyle.rendering)</style>
-        <style>
-        \(style)
-        </style>
-        </head>
-        <body>
-        <article id="content">\(note)\(body)</article>
-        </body>
-        </html>
-
-        """
+        let html = StandalonePage.html(
+            title: fileURL.lastPathComponent, policy: contentSecurityPolicy,
+            styles: [PreviewStyle.page, PreviewStyle.rendering, PreviewStyle.standalone, style], body: note + body
+        )
         return QuickLookPage(html: html, images: images, isTruncated: truncated)
     }
 
     /// No scripts, no network, and images only from attachments or inline data.
     package static let contentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline'; img-src cid: data:; font-src data:; form-action 'none'"
 
-    /// Quick Look has no hover tools or overlay scroll indicator, and needs its own background.
+    /// Quick Look's own spacing and notes, on top of `PreviewStyle.standalone`.
     static let style = """
-    :root { --ql-bg: #ffffff; }
-    @media (prefers-color-scheme: dark) { :root { --ql-bg: #1e1e1e; } }
-    html, body { background: var(--ql-bg); }
     #content { padding: 2.2rem 2.4rem 3rem; }
-    .codeblock .copy { display: none; }
-    .codeblock:hover .lang { opacity: 1; }
-    ::-webkit-scrollbar { width: 11px; height: 11px; }
-    ::-webkit-scrollbar-thumb { background: var(--hair-strong); border-radius: 6px; border: 3px solid transparent; background-clip: content-box; }
     .lexmd-ql-note { font-size: 0.86rem; color: var(--secondary); padding: 0.6em 0.9em; border-radius: 10px; background: var(--fill-strong); }
     .lexmd-image-omitted {
       display: inline-block;

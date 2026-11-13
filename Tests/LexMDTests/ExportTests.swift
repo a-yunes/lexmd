@@ -111,6 +111,11 @@ struct ExportTests {
         #expect(!html.contains("<iframe") && !html.contains("srcdoc") && !html.contains("<template"))
         #expect(html.contains(#"<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none';"#))
         #expect(html.contains("<title>A &lt;b&gt; &amp; &quot;c&quot;</title>"))
+        // The same shell as Quick Look: the reader's language for VoiceOver, and native scroll
+        // bars, since the page has no script to show the preview's overlay indicator.
+        #expect(html.contains("<html lang=\"\(MarkdownHTML.languageTag())\">"))
+        #expect(!html.contains("::-webkit-scrollbar { width: 0") && !html.contains("#lexmd-scroll {"))
+        #expect(html.contains("::-webkit-scrollbar { width: 11px"))
         #expect(html.contains(#"src="data:image/png;base64,"#))
         #expect(html.contains(#"src="https://example.com/remote.png""#))
         #expect(html.contains(#"href="second%20doc.md#part""#))

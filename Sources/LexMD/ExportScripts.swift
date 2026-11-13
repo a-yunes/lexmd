@@ -150,7 +150,7 @@ lexmdEachURL(holder, function (el, name, raw, abs) {
   el.setAttribute(name, nonce + resources.length + ';');
   resources.push({ url: abs, image: name === 'src' && el.localName === 'img' });
 });
-var css = Array.prototype.map.call(document.querySelectorAll('head style:not(#lexmd-katex)'), function (s) { return s.textContent; }).join('\n');
+var css = Array.prototype.map.call(document.querySelectorAll('head style:not(#lexmd-katex):not(#lexmd-overlay)'), function (s) { return s.textContent; }).join('\n');
 // KaTeX's stylesheet is only needed with math, and only the font families the math uses.
 var katexStyle = document.getElementById('lexmd-katex');
 var fonts = new Set();

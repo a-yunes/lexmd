@@ -207,24 +207,6 @@ summary { font-weight: 600; cursor: default; }
 dt { font-weight: 600; }
 dd { margin: 0 0 0.6em 1.4em; }
 sup, sub { line-height: 0; }
-/* Native scroll bars are hidden; #lexmd-scroll is an overlay indicator shown while scrolling. */
-::-webkit-scrollbar { width: 0; height: 0; background: transparent; }
-#lexmd-scroll {
-  position: fixed;
-  top: 0;
-  right: 3px;
-  width: 7px;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.36);
-  opacity: 0;
-  transition: opacity 0.45s ease;
-  pointer-events: none;
-  z-index: 10;
-}
-#lexmd-scroll.visible { opacity: 1; transition-duration: 0.12s; }
-@media (prefers-color-scheme: dark) {
-  #lexmd-scroll { background: rgba(255, 255, 255, 0.38); }
-}
 mark.lexmd-hit {
   background: color-mix(in srgb, #ffd60a 42%, transparent);
   color: inherit;
@@ -399,5 +381,42 @@ a.footnote-back { margin-left: 0.2em; font-size: 0.9em; }
   font-size: 0.92em;
 }
 
+"""#
+
+    /// The in-app preview's scrolling: native scroll bars are hidden and `#lexmd-scroll` is an
+    /// overlay indicator its script shows while scrolling. Only the preview uses this; pages
+    /// without that script (Quick Look, exported HTML) keep native scroll bars.
+    package static let overlayScrolling = #"""
+/* Native scroll bars are hidden; #lexmd-scroll is an overlay indicator shown while scrolling. */
+::-webkit-scrollbar { width: 0; height: 0; background: transparent; }
+#lexmd-scroll {
+  position: fixed;
+  top: 0;
+  right: 3px;
+  width: 7px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.36);
+  opacity: 0;
+  transition: opacity 0.45s ease;
+  pointer-events: none;
+  z-index: 10;
+}
+#lexmd-scroll.visible { opacity: 1; transition-duration: 0.12s; }
+@media (prefers-color-scheme: dark) {
+  #lexmd-scroll { background: rgba(255, 255, 255, 0.38); }
+}
+"""#
+
+    /// Shared by the pages LexMD shows or writes without its script (Quick Look and exported
+    /// HTML): an opaque background, the code block's language label on hover in place of the
+    /// Copy button, and slim native scroll bars.
+    package static let standalone = #"""
+html, body { background: #fff; }
+@media (prefers-color-scheme: dark) { html, body { background: #1e1e1e; } }
+@media print { html, body { background: #fff; } }
+.codeblock .copy { display: none; }
+.codeblock:hover .lang { opacity: 1; }
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-thumb { background: var(--hair-strong); border-radius: 6px; border: 3px solid transparent; background-clip: content-box; }
 """#
 }

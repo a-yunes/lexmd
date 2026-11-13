@@ -200,29 +200,9 @@ enum Exporter {
         let families = Set(result["fonts"] as? [String] ?? [])
         let math = katex.isEmpty ? "" : await runDetached { embedKaTeXFonts(katex, families: families) }
         let html = replacingTokens(in: body, nonce: nonce, with: replacements)
-        let style = withoutAppURLs([css, math, exportCSS].joined(separator: "\n")).replacingOccurrences(of: "</", with: "<\\/")
-        let page = """
-        <!doctype html>
-        <html>
-        <head>
-        <meta charset="utf-8">
-        <meta http-equiv="Content-Security-Policy" content="\(htmlPolicy)">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta name="color-scheme" content="light dark">
-        <meta name="generator" content="LexMD">
-        <title>\(MarkdownHTML.escape(title))</title>
-        <style>
-        \(style)
-        </style>
-        </head>
-        <body>
-        <article id="content">
-        \(html)
-        </article>
-        </body>
-        </html>
-
-        """
+        let style = withoutAppURLs([css, math, PreviewStyle.standalone, exportCSS].joined(separator: "\n"))
+            .replacingOccurrences(of: "</", with: "<\\/")
+        let page = StandalonePage.html(title: title, policy: htmlPolicy, styles: [style], body: "\n" + html + "\n")
         return HTMLExport(html: page, linkedImages: linked)
     }
 
@@ -250,13 +230,9 @@ enum Exporter {
         + "img-src 'self' data: file: https: http:; media-src 'self' data: file: https: http:; font-src data:; "
         + "base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'"
 
-    /// Page background and small adjustments for a page without LexMD's script.
+    /// Exported pages' own spacing, on top of `PreviewStyle.standalone`.
     private static let exportCSS = """
-    html { background: #fff; }
-    @media (prefers-color-scheme: dark) { html { background: #1e1e1e; } }
-    @media print { html { background: #fff; } }
     #content { padding-bottom: 4rem; }
-    .codeblock:hover .lang { opacity: 1; }
     """
 
     /// KaTeX's stylesheet with the font faces of `families` embedded as WOFF2 data URIs and
