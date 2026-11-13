@@ -130,6 +130,48 @@ extension TabCommandTests {
         model.closeTabsForProjectChange()
     }
 
+    /// Unsaved text that can't be written into the Trash with its document is offered for saving
+    /// elsewhere instead of being dropped with the tab.
+    @Test func trashOffersToKeepTextItCouldNotMove() async throws {
+        let folder = try TestFolder()
+        let trash = try TestFolder()
+        try folder.write("a.md", "# A\n")
+        try folder.write("b.md", "# B\n")
+        let model = AppModel.shared
+        model.open(folder.url)
+        try await waitUntil { !model.tree.isEmpty }
+        let path = { FileScanner.canonicalPath(folder.url.appendingPathComponent($0).path) }
+        model.open(URL(fileURLWithPath: path("a.md")))
+        model.openInNewTab(path("b.md"))
+        let aTab = try #require(model.tabStore.list.tab(withPath: path("a.md")))
+        model.tabStore.list.update(aTab.id) { $0.state.unsavedText = "# A unsaved\n" }
+
+        // The item lands in the Trash, but the reported location can't be written to.
+        let trashRoot = FileScanner.canonicalPath(trash.url.path)
+        model.sidebarFiles.recycler = { urls in
+            var result: [URL: URL] = [:]
+            for url in urls {
+                try FileManager.default.moveItem(at: url, to: URL(fileURLWithPath: trashRoot).appendingPathComponent(url.lastPathComponent))
+                result[url] = URL(fileURLWithPath: trashRoot + "/missing/" + url.lastPathComponent)
+            }
+            return result
+        }
+        var offered: [(path: String, text: String)] = []
+        let keep = AppModel.keepUnsavedElsewhere
+        AppModel.keepUnsavedElsewhere = { documents, _, finish in offered = documents; finish() }
+        defer {
+            model.sidebarFiles.recycler = FileOperations.systemRecycler
+            AppModel.keepUnsavedElsewhere = keep
+        }
+
+        let a = path("a.md")
+        model.moveToTrash(URL(fileURLWithPath: a))
+        try await waitUntil { model.tabStore.list.tab(withPath: a) == nil }
+        #expect(offered.map(\.path) == [a])
+        #expect(offered.first?.text == "# A unsaved\n")
+        model.closeTabsForProjectChange()
+    }
+
     /// The outline panel, its toolbar button, and Show/Hide Outline follow what the document has
     /// to show, while the reader's preference to show the panel is kept.
     @Test func outlineShowsOnlyForDocumentsWithContent() async throws {

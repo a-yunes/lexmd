@@ -351,13 +351,10 @@ extension AppModel {
         history = history.filter { !inside($0) }
         historyIndex = min(historyIndex, history.count - 1)
         // Text that never reached the disk (typed while the item was moving, or that a tab could
-        // not save) goes with its document to the Trash rather than being dropped with the tab.
-        var unsaved = tabStore.list.tabs.compactMap { tab in tab.state.unsavedText.map { (tab.path, $0) } }
-        if let current = currentFile?.path, text != savedText { unsaved.append((current, text)) }
-        for (document, contents) in unsaved where inside(document) {
-            guard let trashed, let moved = PathMove(from: path, to: trashed.path).map(document) else { continue }
-            try? contents.write(toFile: moved, atomically: false, encoding: .utf8)
-        }
+        // not save) goes with its document to the Trash rather than being dropped with the tab;
+        // what can't be written there is offered for saving elsewhere once the tabs are closed.
+        let unsaved = unsavedDocuments().filter { inside($0.path) }
+        let unwritten = trashed.map { writeUnsaved(unsaved, through: PathMove(from: path, to: $0.path)) } ?? unsaved
         if let current = currentFile?.path, inside(current) {
             // Nothing may write its text back to the old place.
             savedText = text
@@ -365,6 +362,10 @@ extension AppModel {
             if tabStore.list.activeID != nil { showActiveTab() } else { closeDocument() }
         } else {
             _ = tabStore.list.removeAll(where: inside)
+        }
+        if !unwritten.isEmpty {
+            let name = (path as NSString).lastPathComponent
+            Self.keepUnsavedElsewhere(unwritten, { Self.trashedItemAlert(name: name, documents: unwritten) }) {}
         }
         persistTabs()
         rescan()

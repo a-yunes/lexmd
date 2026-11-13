@@ -624,12 +624,7 @@ final class AppModel {
             followProjectMove(to: newRoot)
         case .trashed(let trashed):
             // Keep unsaved changes with the folder in the Trash, so Put Back brings them along.
-            let move = PathMove(from: root, to: trashed)
-            let unwritten = unsavedDocuments().filter { document in
-                guard let target = move.map(document.path) else { return true }
-                return (try? document.text.write(toFile: target, atomically: false, encoding: .utf8)) == nil
-            }
-            closeProjectKeeping(unwritten, name: name)
+            closeProjectKeeping(writeUnsaved(unsavedDocuments(), through: PathMove(from: root, to: trashed)), name: name)
         case .removed:
             var isDirectory: ObjCBool = false
             if FileManager.default.fileExists(atPath: root, isDirectory: &isDirectory), isDirectory.boolValue {
@@ -684,17 +679,41 @@ final class AppModel {
         return documents
     }
 
+    /// Writes each document's text to where `move` took its file, and returns the documents it
+    /// couldn't write, so the caller can keep them some other way.
+    func writeUnsaved(_ documents: [(path: String, text: String)], through move: PathMove) -> [(path: String, text: String)] {
+        documents.filter { document in
+            guard let target = move.map(document.path) else { return true }
+            return (try? document.text.write(toFile: target, atomically: false, encoding: .utf8)) == nil
+        }
+    }
+
     /// Closes a project whose folder is gone, first offering to save `documents` elsewhere.
     private func closeProjectKeeping(_ documents: [(path: String, text: String)], name: String) {
         guard !documents.isEmpty else { closeProject(); return }
-        present(Self.missingProjectAlert(name: name, documents: documents)) { [weak self] response in
+        Self.keepUnsavedElsewhere(documents, { Self.missingProjectAlert(name: name, documents: documents) }) { [weak self] in
+            self?.closeProject()
+        }
+    }
+
+    /// Offers to save text that lost its file in another folder, then runs `finish`. There is no
+    /// Cancel: the file is already gone, so the text is either kept elsewhere or discarded.
+    /// Replaced in tests.
+    static var keepUnsavedElsewhere: (
+        _ documents: [(path: String, text: String)], _ alert: @escaping () -> NSAlert, _ finish: @escaping () -> Void
+    ) -> Void = { documents, alert, finish in
+        AppModel.shared.askToKeep(documents, alert: alert, then: finish)
+    }
+
+    private func askToKeep(_ documents: [(path: String, text: String)], alert: @escaping () -> NSAlert, then finish: @escaping () -> Void) {
+        present(alert()) { [weak self] response in
             guard let self else { return }
-            guard response == .alertFirstButtonReturn else { self.closeProject(); return }
+            guard response == .alertFirstButtonReturn else { finish(); return }
             let panel = Self.unsavedDocumentsFolderPanel()
             self.present(panel) { [weak self] response in
                 guard let self else { return }
                 guard response == .OK, let folder = panel.url else {
-                    self.closeProjectKeeping(documents, name: name)
+                    self.askToKeep(documents, alert: alert, then: finish)
                     return
                 }
                 do {
@@ -703,10 +722,10 @@ final class AppModel {
                         let target = FileOperations.uniqueURL(in: folder, base: file.deletingPathExtension, extension: file.pathExtension)
                         try document.text.write(to: target, atomically: true, encoding: .utf8)
                     }
-                    self.closeProject()
+                    finish()
                 } catch {
                     // Ask again once the error has been read, so the text is never dropped.
-                    self.present(NSAlert(error: error)) { [weak self] _ in self?.closeProjectKeeping(documents, name: name) }
+                    self.present(NSAlert(error: error)) { [weak self] _ in self?.askToKeep(documents, alert: alert, then: finish) }
                 }
             }
         }
@@ -722,6 +741,20 @@ final class AppModel {
             ? "Changes to “\((documents[0].path as NSString).lastPathComponent)”"
             : "Changes to \(documents.count) documents"
         alert.informativeText = "\(what) couldn’t be saved because the project folder is gone. Save them in another folder to keep them."
+        alert.addButton(withTitle: "Save to Folder…")
+        alert.addDestructiveButton("Discard Changes")
+        return alert
+    }
+
+    /// An item went to the Trash, but some of its documents' unsaved text couldn't go with it.
+    static func trashedItemAlert(name: String, documents: [(path: String, text: String)]) -> NSAlert {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "“\(name)” is in the Trash"
+        let what = documents.count == 1
+            ? "Changes to “\((documents[0].path as NSString).lastPathComponent)”"
+            : "Changes to \(documents.count) documents"
+        alert.informativeText = "\(what) couldn’t be saved with it. Save them in another folder to keep them."
         alert.addButton(withTitle: "Save to Folder…")
         alert.addDestructiveButton("Discard Changes")
         return alert
