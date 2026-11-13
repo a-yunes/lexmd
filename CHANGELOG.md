@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.1
+
+- Fixed a crash when the window was resized narrow, or opened narrow, with the outline or Split
+  view showing.
+- Resizing the window no longer makes the preview blink. The preview keeps your place, and the
+  outline's current heading stays put until the resize ends.
+- Rows in the outline can be clicked anywhere along their height, not just on their text.
+- An outline shown in a window too narrow for it stays open until you hide it.
+- In a very narrow Split view, the editor and preview share the space evenly.
+
 ## 1.1.0
 
 - A demo project with diagrams, math, callouts, links and images opens during setup. Help > Open
