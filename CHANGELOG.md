@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.2
+
+- Undoing a paste or a table edit is saved. Before, the file could keep the text you undid.
+- Moving a file or folder to the Trash while it has unsaved changes that can't follow it now
+  offers to keep those changes, as closing a deleted project already did.
+- Projects in iCloud Drive, or anywhere else inside your Library folder, update the sidebar when
+  files change outside LexMD.
+- A renamed or moved document stays in Open Quickly's recent files.
+- The editor ends a code block at a closing fence longer than the opening one, as the preview
+  does, and front matter with Windows line endings is recognized everywhere.
+- Links to files with a colon in their name, such as `2026:plan.md`, are written so they aren't
+  read as web addresses.
+- Exported HTML declares the page language, uses the system's scroll bars, and removes the same
+  unsafe SVG content that diagrams already drop.
+
 ## 1.1.1
 
 - Fixed a crash when the window was resized narrow, or opened narrow, with the outline or Split
