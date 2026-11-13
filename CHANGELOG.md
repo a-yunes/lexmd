@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.1.3
+
+- Text that couldn't be saved is never replaced: opening another document puts it in a new tab,
+  and a tab whose file can no longer be read offers to save its text in another folder.
+- Saving keeps a file's encoding, including UTF-16 and byte order marks, instead of converting it
+  to UTF-8.
+- When another app changes an open document that has unsaved edits, LexMD asks which version to
+  keep instead of saving over it.
+- Find and Replace from Preview Only shows the source first, so the match you replace is the one
+  you see. Each tab keeps its Whole Words and Regular Expression settings.
+- Update Links keeps links between items moved together, updates nothing for a rename that was
+  undone, and follows a file renamed twice to its final name.
+- Opening another project no longer leaves the previous project's commit sheet, sidebar undo or
+  link questions behind, and opening a folder with files from it asks about unsaved text once.
+- Git stays available after an interrupted lookup, and a commit's result is always shown.
+- Copy as Rich Text copies the document on screen, with its latest edits. Links to a heading,
+  saved scroll positions and the find bar's current match follow the right document.
+- The preview keeps your place when it reloads, and stops reloading content that keeps making it
+  crash.
+- A shortcut chosen before a newer default took the same keys keeps working. Recording a
+  shortcut in Settings no longer takes keys typed in other windows.
+- Find in Files results open at the match that was clicked, and Back, Forward, Redo of Move to
+  Trash and Duplicate, and onboarding's Back button keep their place.
+
 ## 1.1.2
 
 - Undoing a paste or a table edit is saved. Before, the file could keep the text you undid.
