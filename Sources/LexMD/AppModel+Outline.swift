@@ -253,11 +253,14 @@ extension AppModel {
     }
 
     /// Recomputes whether the outline fits beside the document at the current window width.
+    ///
+    /// An outline the reader showed in a narrow window stays until they hide it, rather than
+    /// depending on a width that showing or hiding it can change: that would hide it, show it
+    /// again, and so on, every frame, until AppKit stopped the layout loop with an exception.
     func updateOutlineFit() {
         let fits = OutlineLayout.fits(windowWidth: windowWidth, sidebarVisible: isSidebarVisible, mode: viewMode)
         guard fits != outlineFitsWindow else { return }
         outlineFitsWindow = fits
-        if fits { showsOutlineWhileNarrow = false }
     }
 
     func outlineVisibilityChanged() {

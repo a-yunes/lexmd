@@ -179,6 +179,45 @@ final class WindowDocumentView: NSView {
     }
 }
 
+/// Reports the window's width as it changes. The content's own geometry is no substitute: while
+/// the outline column is hidden in a narrow window, the content measures wider than the window,
+/// so the outline would fit by a width that showing it takes away, and show and hide every frame.
+struct WindowWidthReader: NSViewRepresentable {
+    let onChange: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> WindowWidthView {
+        let view = WindowWidthView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ view: WindowWidthView, context: Context) {
+        view.onChange = onChange
+    }
+}
+
+final class WindowWidthView: NSView {
+    var onChange: ((CGFloat) -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didResizeNotification, object: nil)
+        guard let window else { return }
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(windowDidResize(_:)), name: NSWindow.didResizeNotification, object: window
+        )
+        report()
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    @objc private func windowDidResize(_ notification: Notification) { report() }
+
+    private func report() {
+        if let window { onChange?(window.frame.width) }
+    }
+}
+
 // MARK: - Quick Look
 
 /// The Quick Look panel for files in the sidebar, as Space shows it in Finder. It sits in the

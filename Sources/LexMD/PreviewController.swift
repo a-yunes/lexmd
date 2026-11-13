@@ -337,6 +337,23 @@ final class PreviewWebView: WKWebView {
     var onPinch: ((Int) -> Void)?
     private var pinch = PinchSteps()
 
+    /// Shorter than the preview ever really is; the window's minimum height keeps it far taller.
+    static let placeholderHeight: CGFloat = 120
+
+    /// On each step of a live window resize, the enclosing navigation columns are first laid out
+    /// at a placeholder height (their toolbar inset) and then at their real size. AppKit views
+    /// only draw the final size, but a web view hands every size to its renderer at once, so
+    /// following the placeholder would shrink the page to a strip and back on every step and the
+    /// preview would blink. While the reader drags, the web view keeps its size through that pass.
+    override func setFrameSize(_ newSize: NSSize) {
+        if inLiveResize, Self.isPlaceholder(newSize, current: frame.size) { return }
+        super.setFrameSize(newSize)
+    }
+
+    static func isPlaceholder(_ size: NSSize, current: NSSize) -> Bool {
+        size.height < placeholderHeight && current.height >= placeholderHeight
+    }
+
     override func magnify(with event: NSEvent) {
         guard let onPinch else { return super.magnify(with: event) }
         let steps = pinch.steps(adding: event.magnification, phase: event.phase)

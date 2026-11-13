@@ -19,6 +19,29 @@ struct WindowLayoutTests {
         #expect(OutlineLayout.fits(windowWidth: .infinity, sidebarVisible: true, mode: .split), "before the window reports its width")
     }
 
+    /// The editor and preview keep 260 points each when both fit; in a narrower column they share
+    /// it evenly, so the divider's limits never contradict each other.
+    @Test func panesShareANarrowColumn() {
+        #expect(WorkspaceContainer.paneMinimum(in: 900) == 260)
+        #expect(WorkspaceContainer.paneMinimum(in: 520) == 260)
+        #expect(WorkspaceContainer.paneMinimum(in: 300) == 150)
+        #expect(WorkspaceContainer.paneMinimum(in: 0) == 0)
+        for width in stride(from: CGFloat(0), through: 1000, by: 25) {
+            let minimum = WorkspaceContainer.paneMinimum(in: width)
+            #expect(minimum <= width - minimum, "the lowest divider position is never past the highest")
+        }
+    }
+
+    /// While the reader drags, the preview ignores the placeholder height the navigation columns
+    /// pass through on each step; real sizes, including the first one, always apply.
+    @Test func previewSkipsOnlyPlaceholderHeights() {
+        #expect(PreviewWebView.isPlaceholder(NSSize(width: 400, height: 52), current: NSSize(width: 500, height: 700)))
+        #expect(PreviewWebView.isPlaceholder(NSSize(width: 400, height: 0), current: NSSize(width: 500, height: 700)))
+        #expect(!PreviewWebView.isPlaceholder(NSSize(width: 400, height: 640), current: NSSize(width: 500, height: 700)))
+        #expect(!PreviewWebView.isPlaceholder(NSSize(width: 400, height: 52), current: .zero))
+        #expect(WindowLayout.minHeight > PreviewWebView.placeholderHeight * 3)
+    }
+
     @Test func outlineWidthStaysInItsRange() {
         #expect(OutlineLayout.clampedWidth(10) == OutlineLayout.minWidth)
         #expect(OutlineLayout.clampedWidth(1000) == OutlineLayout.maxWidth)

@@ -86,14 +86,14 @@ final class AppModel {
             updateOutlineFit()
         }
     }
-    /// The window's width, reported by the window. With the sidebar and the view mode, it
+    /// The window's frame width, reported by the window. With the sidebar and the view mode, it
     /// decides whether the outline fits beside the document.
     @ObservationIgnored var windowWidth: CGFloat = .infinity {
         didSet { updateOutlineFit() }
     }
     /// False while the window is too narrow for the outline beside the document.
     var outlineFitsWindow = true
-    /// Set when the reader shows the outline in a window too narrow for it.
+    /// Set when the reader shows the outline in a window too narrow for it; cleared when they hide it.
     var showsOutlineWhileNarrow = false
     var appearanceMode: AppearanceMode = .system {
         didSet {

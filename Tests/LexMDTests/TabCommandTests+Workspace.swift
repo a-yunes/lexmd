@@ -171,6 +171,28 @@ extension TabCommandTests {
         #expect(model.showsOutlinePanel)
         #expect(OutlineSections(model.outline) == OutlineSections(headings: false, backlinks: false, problems: true))
 
+        // Shown in a window too narrow for it, the outline stays until the reader hides it. Showing
+        // it can make the window count as wide for a moment; following that would hide it again,
+        // show it again, and so on.
+        let wasWidth = model.windowWidth
+        defer { model.windowWidth = wasWidth }
+        model.windowWidth = 700
+        #expect(!model.showsOutlinePanel, "it steps aside in a narrow window")
+        model.setOutlineShown(true)
+        #expect(model.showsOutlinePanel)
+        model.windowWidth = 1200
+        model.windowWidth = 700
+        #expect(model.showsOutlinePanel)
+        model.setOutlineShown(false)
+        #expect(!model.showsOutlinePanel)
+        // Shown in a wide window, it still steps aside when the window narrows.
+        model.windowWidth = 1200
+        model.setOutlineShown(true)
+        model.windowWidth = 700
+        #expect(!model.showsOutlinePanel && model.isOutlineVisible)
+        model.windowWidth = 1200
+        #expect(model.showsOutlinePanel)
+
         // Hiding is remembered for documents with content.
         model.toggleOutline()
         #expect(!model.isOutlineVisible && model.canShowOutline && !model.showsOutlinePanel)

@@ -38,8 +38,8 @@ struct ContentView: View {
             }
         }
         .toolbar(removing: .title)
+        .background { WindowWidthReader { model.windowWidth = $0 } }
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
-            model.windowWidth = size.width
             // Whole steps, so resizing the window does not resize sheets on every frame.
             let limit = max(320, ((size.height - 24) / 20).rounded(.down) * 20)
             if limit != sheetHeightLimit { sheetHeightLimit = limit }
@@ -624,10 +624,18 @@ final class WorkspaceContainer: NSView, NSSplitViewDelegate {
     }
 
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        max(proposedMinimumPosition, 260)
+        max(proposedMinimumPosition, Self.paneMinimum(in: splitView.bounds.width))
     }
 
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        min(proposedMaximumPosition, splitView.bounds.width - 260)
+        min(proposedMaximumPosition, splitView.bounds.width - Self.paneMinimum(in: splitView.bounds.width))
+    }
+
+    /// Each pane keeps 260 points when there is room for both. In a narrower column the two
+    /// limits would contradict each other (the divider can't be both right of 260 and left of
+    /// width minus 260), the divider would land somewhere different on every layout pass, and
+    /// AppKit would stop the endless relayout with an exception; there the panes share evenly.
+    static func paneMinimum(in width: CGFloat) -> CGFloat {
+        min(260, max(0, (width / 2).rounded(.down)))
     }
 }
