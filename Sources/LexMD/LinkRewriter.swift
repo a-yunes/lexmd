@@ -1,4 +1,5 @@
 import Foundation
+import LexMDRendering
 
 /// A file or folder that moved from one absolute path to another.
 struct PathMove: Hashable, Sendable {
@@ -59,7 +60,7 @@ enum MarkdownLinkScanner {
     static func links(in text: String) -> [MarkdownLinkSpan] {
         let s = Array(text.utf16)
         let lines = lineRanges(s)
-        let prose = proseLines(s, lines)
+        let prose = proseLines(s, lines, frontMatterLines: FrontMatter.split(text)?.lineCount ?? 0)
         var result: [MarkdownLinkSpan] = []
         var segment: (start: Int, end: Int)?
         for (index, line) in lines.enumerated() {
@@ -135,20 +136,12 @@ enum MarkdownLinkScanner {
     }
 
     /// Marks lines that hold Markdown prose rather than code or front matter.
-    private static func proseLines(_ s: [UInt16], _ lines: [Line]) -> [Bool] {
+    private static func proseLines(_ s: [UInt16], _ lines: [Line], frontMatterLines: Int) -> [Bool] {
         var prose = Array(repeating: true, count: lines.count)
-        var index = 0
-        // YAML front matter.
-        if let first = lines.first, String(utf16CodeUnits: Array(s[first.start..<first.end]), count: first.end - first.start) == "---" {
-            if let close = lines.indices.dropFirst().first(where: {
-                let line = lines[$0]
-                let text = String(utf16CodeUnits: Array(s[line.start..<line.end]), count: line.end - line.start)
-                return text == "---" || text == "..."
-            }) {
-                for i in 0...close { prose[i] = false }
-                index = close + 1
-            }
-        }
+        // YAML front matter, as the preview reads it.
+        let index0 = min(frontMatterLines, lines.count)
+        for i in 0..<index0 { prose[i] = false }
+        var index = index0
         var openFence: (char: UInt16, count: Int)?
         var inIndentedCode = false
         var previousBlank = true

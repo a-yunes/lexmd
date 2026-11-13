@@ -1,4 +1,5 @@
 import AppKit
+import LexMDRendering
 
 /// Lightweight regex-based Markdown styling for the source editor.
 @MainActor
@@ -51,8 +52,9 @@ enum MarkdownHighlighter {
         try! NSRegularExpression(pattern: pattern, options: options)
     }
 
-    private static let frontMatter = re(#"\A---[ \t]*\n[\s\S]*?\n---[ \t]*$"#)
-    private static let fence = re(#"^[ ]{0,3}(`{3,}|~{3,})[^\n]*\n?[\s\S]*?(?:^[ ]{0,3}\1[ \t]*$|\z)"#)
+    /// A fence closes on a run of the same character at least as long as the opening one,
+    /// with nothing but spaces after it (CommonMark), as link updates and completion read it.
+    private static let fence = re(#"^[ ]{0,3}((?<c>[`~])\k<c>{2,})[^\n]*\n?[\s\S]*?(?:^[ ]{0,3}\1\k<c>*[ \t\r]*$|\z)"#)
     private static let comment = re(#"<!--[\s\S]*?-->"#)
     private static let inlineCode = re(#"(`+)(?!`)([^\n]+?)(?<!`)\1(?!`)"#)
     private static let heading = re(#"^(#{1,6})([ \t]+[^\n]*|$)"#)
@@ -88,8 +90,12 @@ enum MarkdownHighlighter {
         func isCovered(_ r: NSRange) -> Bool {
             r.length > 0 && covered.intersects(integersIn: r.location..<NSMaxRange(r))
         }
-        frontMatter.enumerateMatches(in: string, range: full) { m, _, _ in
-            if let r = m?.range, r.length > 0 { add(r, .frontMatter) }
+        if let split = FrontMatter.split(string) {
+            // Through the end of the closing line, without its line break.
+            var end = split.length
+            if end > 0, ns.character(at: end - 1) == 0x0A { end -= 1 }
+            if end > 0, ns.character(at: end - 1) == 0x0D { end -= 1 }
+            add(NSRange(location: 0, length: end), .frontMatter)
         }
         fence.enumerateMatches(in: string, range: full) { m, _, _ in
             if let r = m?.range, r.length > 0, !isCovered(r) { add(r, .fence) }
