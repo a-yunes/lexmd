@@ -60,10 +60,9 @@ final class AppModel {
         }
     }
 
-    /// Path of the file highlighted in the sidebar.
-    var selectedPath: String? {
-        didSet { selectionChanged(from: oldValue) }
-    }
+    /// Path of the file highlighted in the sidebar. Setting it only moves the highlight;
+    /// `showDocument(_:)` opens documents and `sidebarSelected(_:)` handles clicks on rows.
+    var selectedPath: String?
 
     // Document
     var currentFile: URL?
@@ -113,7 +112,6 @@ final class AppModel {
     private(set) var recentFiles: [String] = []
     var history: [String] = []
     var historyIndex = -1
-    @ObservationIgnored var isNavigatingHistory = false
 
     var compactFolders = true {
         didSet {
@@ -447,7 +445,7 @@ final class AppModel {
             let last = FileScanner.canonicalPath(stored)
             if last.hasPrefix(path + "/"), FileManager.default.fileExists(atPath: last) {
                 reveal(last)
-                selectedPath = last
+                showDocument(last)
             }
         }
     }
@@ -472,7 +470,9 @@ final class AppModel {
     }
 
     /// Opens a folder (as the sidebar root) or a Markdown file.
-    func open(_ url: URL) {
+    /// Opens a project folder, or a document (with its folder when it is outside the project).
+    /// `placement` and `recordsHistory` apply to a document; see `showDocument(_:placement:recordsHistory:)`.
+    func open(_ url: URL, placement: DocumentPlacement = .reuseTab, recordsHistory: Bool = true) {
         let path = FileScanner.canonicalPath(url.path)
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { return }
@@ -480,16 +480,16 @@ final class AppModel {
         let inside = rootURL.map { path.hasPrefix($0.path + "/") } ?? false
         let newRoot = isDirectory ? path : (inside ? nil : (path as NSString).deletingLastPathComponent)
         guard let newRoot, let root = rootURL?.path, newRoot != root else {
-            finishOpening(path, isDirectory: isDirectory)
+            finishOpening(path, isDirectory: isDirectory, placement: placement, recordsHistory: recordsHistory)
             return
         }
         // Opening another project closes these tabs: text that can't be saved is never dropped.
         settleUnsavedText(before: "open another project") { [weak self] proceed in
-            if proceed { self?.finishOpening(path, isDirectory: isDirectory) }
+            if proceed { self?.finishOpening(path, isDirectory: isDirectory, placement: placement, recordsHistory: recordsHistory) }
         }
     }
 
-    private func finishOpening(_ path: String, isDirectory: Bool) {
+    private func finishOpening(_ path: String, isDirectory: Bool, placement: DocumentPlacement, recordsHistory: Bool) {
         if isDirectory {
             setRoot(URL(fileURLWithPath: path, isDirectory: true))
             if tabStore.list.isEmpty { restoreTabs() }
@@ -501,7 +501,7 @@ final class AppModel {
             setRoot(URL(fileURLWithPath: path).deletingLastPathComponent())
         }
         reveal(path)
-        selectedPath = path
+        showDocument(path, placement: placement, recordsHistory: recordsHistory)
     }
 
     private func setRoot(_ url: URL) {
@@ -831,25 +831,9 @@ final class AppModel {
 
     // MARK: - Document lifecycle
 
-    private func selectionChanged(from old: String?) {
-        guard selectedPath != old else { return }
-        guard let path = selectedPath else {
-            // Keep the open document highlighted when the list clears its selection.
-            if let current = currentFile?.path { selectedPath = current }
-            return
-        }
-        guard path != currentFile?.path else { return }
-        if Self.isContextClick(Self.currentEvent()) {
-            // A secondary click shows the row's menu. Opening the row here would replace the
-            // document in the active tab before a command such as Open in New Tab runs.
-            selectedPath = currentFile?.path
-            return
-        }
-        if routeSelectionToTabs(path) { return }
-        load(URL(fileURLWithPath: path))
-    }
-
-    func load(_ url: URL) {
+    /// Loads a document into the editor and preview. `recordsHistory` is false for Back and
+    /// Forward, and for a tab's own document, whose history the tab restores.
+    func load(_ url: URL, recordsHistory: Bool = true) {
         saveNow()
         guard let content = Self.read(url) else {
             NSSound.beep()
@@ -871,7 +855,7 @@ final class AppModel {
         pendingScrollReset = true
         render(debounce: false)
         defaults.set(url.path, forKey: Keys.lastFile)
-        recordVisit(url.path)
+        recordVisit(url.path, recordsHistory: recordsHistory)
         tabDidLoad(url)
     }
 
@@ -981,10 +965,10 @@ final class AppModel {
 
     // MARK: - Navigation
 
-    private func recordVisit(_ path: String) {
+    private func recordVisit(_ path: String, recordsHistory: Bool) {
         recentFiles = Array(([path] + recentFiles.filter { $0 != path }).prefix(30))
         defaults.set(recentFiles, forKey: Keys.recentFiles)
-        guard !isNavigatingHistory else { return }
+        guard recordsHistory else { return }
         if historyIndex < history.count - 1 { history.removeSubrange((historyIndex + 1)...) }
         if history.last != path { history.append(path) }
         historyIndex = history.count - 1
@@ -1003,9 +987,7 @@ final class AppModel {
         }
         guard index >= 0, index < history.count else { NSSound.beep(); return }
         historyIndex = index
-        isNavigatingHistory = true
-        open(URL(fileURLWithPath: history[index]))
-        isNavigatingHistory = false
+        open(URL(fileURLWithPath: history[index]), placement: .active, recordsHistory: false)
     }
 
     func toggleSidebar() {

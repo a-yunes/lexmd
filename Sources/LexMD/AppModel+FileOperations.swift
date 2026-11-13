@@ -82,7 +82,7 @@ extension AppModel {
             }
             ensureSidebarVisible()
             reveal(file.path)
-            selectedPath = file.path
+            showDocument(file.path)
             sidebarFiles.renameIsNewDocument = true
             sidebarFiles.renamingPath = file.path
             rescanSoon()

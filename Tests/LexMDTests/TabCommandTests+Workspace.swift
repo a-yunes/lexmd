@@ -35,7 +35,7 @@ extension TabCommandTests {
         // open the row in the active tab, or Open in New Tab finds it already showing.
         let previousEvent = AppModel.currentEvent
         AppModel.currentEvent = { click }
-        model.selectedPath = path("b.md")
+        model.sidebarSelected(path("b.md"))
         AppModel.currentEvent = previousEvent
         #expect(model.currentFile?.path == path("a.md"))
         #expect(model.selectedPath == path("a.md"))
@@ -55,10 +55,10 @@ extension TabCommandTests {
         ))
         try folder.write("c.md", "# C\n")
         AppModel.currentEvent = { commandClick }
-        model.selectedPath = path("c.md")
+        model.sidebarSelected(path("c.md"))
         AppModel.currentEvent = previousEvent
         #expect(model.tabStore.list.tabs.map(\.path) == [path("a.md"), path("b.md"), path("c.md")])
-        model.selectedPath = path("a.md")
+        model.sidebarSelected(path("a.md"))
         #expect(model.tabStore.list.count == 3)
         #expect(model.currentFile?.path == path("a.md"))
 
@@ -127,6 +127,48 @@ extension TabCommandTests {
         #expect(try String(contentsOfFile: trashRoot + "/notes/a.md", encoding: .utf8) == "# A typed during the move\n")
         #expect(try String(contentsOfFile: trashRoot + "/notes/b.md", encoding: .utf8) == "# B unsaved\n")
         #expect(model.tabStore.list.isEmpty)
+        model.closeTabsForProjectChange()
+    }
+
+    /// Back and Forward retrace the documents opened in the tab, open them in the active tab even
+    /// when another tab shows them, and don't record their own visits; opening a document after
+    /// going back drops the documents ahead.
+    @Test func backAndForwardRetraceTheTabsDocuments() async throws {
+        let folder = try TestFolder()
+        for name in ["a", "b", "c", "d"] { try folder.write("\(name).md", "# \(name)\n") }
+        let model = AppModel.shared
+        model.open(folder.url)
+        try await waitUntil { model.tree.count == 4 }
+        let path = { FileScanner.canonicalPath(folder.url.appendingPathComponent($0).path) }
+        let current = { model.currentFile?.path }
+        model.open(URL(fileURLWithPath: path("a.md")))
+        model.open(URL(fileURLWithPath: path("b.md")))
+        model.open(URL(fileURLWithPath: path("c.md")))
+        #expect(current() == path("c.md") && model.canGoBack && !model.canGoForward)
+
+        model.goBack()
+        #expect(current() == path("b.md") && model.selectedPath == path("b.md"))
+        model.goBack()
+        #expect(current() == path("a.md") && !model.canGoBack && model.canGoForward)
+        model.goForward()
+        #expect(current() == path("b.md") && model.canGoBack && model.canGoForward)
+
+        // Opening a document after going back drops c from the documents ahead.
+        model.open(URL(fileURLWithPath: path("d.md")))
+        #expect(!model.canGoForward)
+        model.goBack()
+        #expect(current() == path("b.md"))
+
+        // Back stays in the active tab even though another tab shows a.md.
+        let tabs = model.tabStore.list.tabs.count
+        model.openInNewTab(path("a.md"))
+        let aTab = model.tabStore.list.activeID
+        model.selectTab(try #require(model.tabStore.list.tabs.first { $0.id != aTab }?.id))
+        #expect(current() == path("b.md"))
+        model.goBack()
+        #expect(current() == path("a.md"))
+        #expect(model.tabStore.list.activeID != aTab, "the active tab loaded it")
+        #expect(model.tabStore.list.tabs.count == tabs + 1)
         model.closeTabsForProjectChange()
     }
 
