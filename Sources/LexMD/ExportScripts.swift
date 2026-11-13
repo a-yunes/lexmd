@@ -2,9 +2,9 @@
 /// LexMD's content world, never in the page world where document markup lives.
 enum ExportScripts {
     /// Waits for LexMD's rendering to finish: queued diagrams and math are rendered at once with
-    /// `lexmdRenderAll()`, an optional `lexmdWhenRendered()` promise is awaited, and the content
-    /// must stop changing. With `eager`, images load immediately, every image is awaited, and
-    /// collapsed details open so printouts show everything.
+    /// `lexmdRenderAll()`, and the content must stop changing (diagram and math libraries load on
+    /// demand). With `eager`, images load immediately, every image is awaited, and collapsed
+    /// details open so printouts show everything.
     static let settle = #"""
 var content = document.getElementById('content');
 var deadline = Date.now() + limit;
@@ -14,12 +14,7 @@ if (eager) {
   content.querySelectorAll('img[loading]').forEach(function (img) { img.removeAttribute('loading'); });
   content.querySelectorAll('details').forEach(function (d) { d.open = true; });
 }
-if (typeof lexmdRenderAll === 'function') {
-  try { await lexmdRenderAll(); } catch (e) {}
-}
-if (typeof window.lexmdWhenRendered === 'function') {
-  try { await Promise.race([Promise.resolve(window.lexmdWhenRendered()), sleep(left())]); } catch (e) {}
-}
+try { lexmdRenderAll(); } catch (e) {}
 await new Promise(function (resolve) {
   var timer = null, finished = false;
   var observer = new MutationObserver(function () { clearTimeout(timer); timer = setTimeout(finish, 200); });
@@ -68,10 +63,8 @@ var XHTML = 'http://www.w3.org/1999/xhtml';
 var DROP = /^(\#(UnsafeMarkup.elements))$/i;
 
 // Finishes any diagrams and math still queued in the preview.
-async function lexmdFinish() {
-  if (typeof lexmdRenderAll === 'function') {
-    try { await lexmdRenderAll(); } catch (e) {}
-  }
+function lexmdFinish() {
+  try { lexmdRenderAll(); } catch (e) {}
 }
 
 function lexmdClone(useSelection) {
@@ -139,7 +132,7 @@ function lexmdEachURL(root, visit) {
     /// Serializes the rendered document for a standalone HTML file. Local references become
     /// numbered tokens that the app replaces with data URIs or relative paths.
     static let exportHTML = #"""
-await lexmdFinish();
+lexmdFinish();
 var holder = lexmdClone(false).holder;
 lexmdScrub(holder);
 var resources = [];
@@ -167,7 +160,7 @@ return {
     /// Captures the selection or the whole document as styled HTML (with inline styles that
     /// survive pasting into Mail, Pages, Notes, and web editors), HTML for RTF, and plain text.
     static let copy = #"""
-await lexmdFinish();
+lexmdFinish();
 var picked = lexmdClone(useSelection);
 var holder = picked.holder;
 lexmdScrub(holder);

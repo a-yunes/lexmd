@@ -28,6 +28,24 @@ struct PreviewLoadingTests {
         #expect(try await page(preview, "return document.querySelector('meta[http-equiv]').content.indexOf('https:') >= 0") as? Bool == true)
     }
 
+    /// Export waits for the page template by awaiting its load, not by polling: callers waiting
+    /// before the load finish with it, later callers return at once, and a short limit gives up.
+    @Test func waitingForThePageTemplate() async throws {
+        let (early, earlyWindow) = makePreview()
+        defer { earlyWindow.contentView = nil }
+        let gaveUp = await early.pageLoaded(within: 0)
+        #expect(!gaveUp, "the template can't load within no time")
+
+        let (preview, window) = makePreview()
+        defer { window.contentView = nil }
+        async let first = preview.pageLoaded(within: 20)
+        async let second = preview.pageLoaded(within: 20)
+        let (a, b) = await (first, second)
+        #expect(a && b)
+        let later = await preview.pageLoaded(within: 0)
+        #expect(later)
+    }
+
     @Test func scrollPositionWaitsForTheNextDocument() async throws {
         let (preview, window) = makePreview()
         defer { window.contentView = nil }

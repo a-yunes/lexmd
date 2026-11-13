@@ -56,10 +56,7 @@ final class OffscreenRenderer {
         let html = await runDetached { MarkdownHTML.render(markdown, links: links) }
         preview.render(html: html, baseURL: document.baseURL, resetScroll: true)
         let deadline = Date().addingTimeInterval(timeout)
-        while !preview.isPageLoaded {
-            guard Date() < deadline else { throw ExportError.renderTimedOut }
-            try await Task.sleep(for: .milliseconds(20))
-        }
+        guard await preview.pageLoaded(within: timeout) else { throw ExportError.renderTimedOut }
         let limit = max(1000, Int(deadline.timeIntervalSinceNow * 1000))
         _ = try await preview.evaluate(ExportScripts.settle, ["eager": forPrint, "limit": limit])
     }

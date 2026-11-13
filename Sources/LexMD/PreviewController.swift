@@ -33,6 +33,7 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     private var highlightScrollUntil = Date.distantPast
 
     private var isLoaded = false
+    private var loadWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
     private var isLoadingTemplate = false
     /// The latest template load; callbacks for loads it superseded are ignored.
     private var templateNavigation: WKNavigation?
@@ -240,6 +241,20 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     /// True once the page has loaded; renders requested before that have been sent to it.
     var isPageLoaded: Bool { isLoaded }
 
+    /// Returns true once the page template has loaded (at once if it has), or false after
+    /// `seconds`.
+    func pageLoaded(within seconds: Double) async -> Bool {
+        if isLoaded { return true }
+        let id = UUID()
+        return await withCheckedContinuation { continuation in
+            loadWaiters[id] = continuation
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(seconds))
+                self?.loadWaiters.removeValue(forKey: id)?.resume(returning: false)
+            }
+        }
+    }
+
     /// Runs a script body in LexMD's content world after any pending render, and returns its result.
     func evaluate(_ body: String, _ arguments: [String: Any] = [:]) async throws -> Any? {
         try await webView.callAsyncJavaScript(body, arguments: arguments, in: nil, contentWorld: Self.world)
@@ -274,6 +289,9 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         isLoadingTemplate = false
         templateRetries = 0
         isLoaded = true
+        let waiters = loadWaiters.values
+        loadWaiters = [:]
+        waiters.forEach { $0.resume(returning: true) }
         call("lexmdZoom(s)", ["s": scale])
         applyPageOptions()
         pendingReset = true
