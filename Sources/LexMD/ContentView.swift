@@ -561,20 +561,11 @@ final class WorkspaceContainer: NSView, NSSplitViewDelegate {
         split.isVertical = true
         split.dividerStyle = .thin
         split.delegate = self
-        split.translatesAutoresizingMaskIntoConstraints = false
         editor.removeFromSuperview()
         preview.removeFromSuperview()
         split.addArrangedSubview(editor)
         split.addArrangedSubview(preview)
         addSubview(split)
-        // Pin to the safe area so content never sits under the floating sidebar or toolbar.
-        let guide = safeAreaLayoutGuide
-        NSLayoutConstraint.activate([
-            split.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
-            split.trailingAnchor.constraint(equalTo: guide.trailingAnchor),
-            split.topAnchor.constraint(equalTo: guide.topAnchor),
-            split.bottomAnchor.constraint(equalTo: guide.bottomAnchor),
-        ])
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -615,8 +606,31 @@ final class WorkspaceContainer: NSView, NSSplitViewDelegate {
         isSinglePane ? .zero : proposedEffectiveRect
     }
 
+    /// Shorter than any real document area; see `layout()`.
+    static let placeholderHeight: CGFloat = 120
+
+    static func isPlaceholderPass(area: NSRect, current: NSRect) -> Bool {
+        area.height < placeholderHeight && current.height >= placeholderHeight
+    }
+
+    /// The split fills the safe area so content never sits under the floating sidebar or toolbar.
+    ///
+    /// On each step of a window resize, including the last one after the live resize ends, the
+    /// enclosing navigation columns are first laid out at a placeholder height (their toolbar
+    /// inset) and then at their real size, in the same step. AppKit views only draw the final
+    /// size, but the web view passes every size to its renderer at once, so following the
+    /// placeholder would shrink the preview to a strip and back on every step. The split keeps
+    /// its size through that pass; the window's minimum height keeps real areas far taller.
     override func layout() {
         super.layout()
+        let insets = safeAreaInsets
+        let area = NSRect(
+            x: insets.left, y: insets.bottom,
+            width: max(0, bounds.width - insets.left - insets.right),
+            height: max(0, bounds.height - insets.top - insets.bottom)
+        )
+        if Self.isPlaceholderPass(area: area, current: split.frame) { return }
+        if split.frame != area { split.frame = area }
         if needsEvenSplit, mode == .split, split.bounds.width > 0 {
             needsEvenSplit = false
             split.setPosition((split.bounds.width / 2).rounded(), ofDividerAt: 0)
