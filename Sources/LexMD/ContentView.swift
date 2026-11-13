@@ -538,6 +538,14 @@ struct WorkspaceView: NSViewRepresentable {
         WorkspaceContainer(editor: model.editor.scrollView, preview: model.preview.webView)
     }
 
+    /// The workspace takes whatever size it is offered. Without this, SwiftUI measures it through
+    /// Auto Layout, where the panes' frame (set directly in `WorkspaceContainer.layout()`) is
+    /// fixed; inside the navigation column that measurement feeds back into the column's own
+    /// size updates until AppKit stops the update-constraints loop with an exception.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: WorkspaceContainer, context: Context) -> CGSize? {
+        proposal.replacingUnspecifiedDimensions(by: .zero)
+    }
+
     func updateNSView(_ container: WorkspaceContainer, context: Context) {
         container.setMode(mode)
     }
