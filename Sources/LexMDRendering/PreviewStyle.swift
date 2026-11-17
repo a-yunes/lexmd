@@ -279,7 +279,7 @@ html.lexmd-differentiate mark.lexmd-hit.current { text-decoration: underline; te
   html { font-size: 11pt !important; }
   html, body { background: #fff !important; color: var(--text); }
   #content { max-width: none; margin: 0; padding: 0; }
-  #content:empty::before, #lexmd-scroll, .codeblock .copy, .codeblock .lang { display: none !important; }
+  #content:empty::before, #lexmd-scroll, #lexmd-track, .codeblock .copy, .codeblock .lang { display: none !important; }
   h1, h2, h3, h4, h5, h6 { break-after: avoid; page-break-after: avoid; break-inside: avoid; }
   h1 + p { color: var(--text); }
   p, li, dd, blockquote { orphans: 3; widows: 3; }
@@ -402,6 +402,10 @@ a.footnote-back { margin-left: 0.2em; font-size: 0.9em; }
   z-index: 10;
 }
 #lexmd-scroll.visible { opacity: 1; transition-duration: 0.12s; }
+#lexmd-scroll.wide { right: 2px; width: 10px; border-radius: 5px; transition: opacity 0.12s ease, width 0.12s ease, right 0.12s ease; }
+/* The draggable strip along the right edge; the indicator above shows where it is. */
+#lexmd-track { position: fixed; top: 0; right: 0; bottom: 0; width: 15px; z-index: 11; }
+#lexmd-track.idle { display: none; }
 @media (prefers-color-scheme: dark) {
   #lexmd-scroll { background: rgba(255, 255, 255, 0.38); }
 }

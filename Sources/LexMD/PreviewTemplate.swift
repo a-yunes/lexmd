@@ -41,8 +41,24 @@ enum PreviewTemplate {
   var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   function scrollBehavior(smooth) { return smooth && !reducedMotion.matches ? 'smooth' : 'auto'; }
 
+  // Blocks carry the source lines they were rendered from. Lines move whenever text above them
+  // changes, so blocks are compared without them and kept blocks take their new lines. The
+  // pattern only matches inside a tag, right after its name, where the renderer puts them: in
+  // serialized text and attribute values `<` and `"` are escaped.
+  var LINE_ATTRS = /(<[a-z][a-z0-9]*) data-line="\d+"(?: data-end="\d+")?/g;
   function sourceOf(node) {
-    return node.nodeType === 1 ? node.outerHTML : node.textContent;
+    return node.nodeType === 1 ? node.outerHTML.replace(LINE_ATTRS, '$1') : node.textContent;
+  }
+  function copyLine(from, to) {
+    to.setAttribute('data-line', from.getAttribute('data-line'));
+    if (from.hasAttribute('data-end')) to.setAttribute('data-end', from.getAttribute('data-end'));
+    else to.removeAttribute('data-end');
+  }
+  function copyLines(from, to) {
+    if (from.nodeType !== 1 || to.nodeType !== 1) return;
+    if (from.hasAttribute('data-line')) copyLine(from, to);
+    var a = from.querySelectorAll('[data-line]'), b = to.querySelectorAll('[data-line]');
+    for (var i = 0; i < a.length && i < b.length; i++) copyLine(a[i], b[i]);
   }
 
   // A block that fails to enhance still shows, and the blocks after it still render.
@@ -72,7 +88,7 @@ enum PreviewTemplate {
       spyPin = null;
       content.textContent = '';
       next.forEach(function (n, i) { n.__src = nextSrc[i]; content.appendChild(n); prepare(n); });
-      window.scrollTo(0, 0);
+      scrollPage(0);
       return;
     }
     var old = Array.prototype.slice.call(content.childNodes);
@@ -80,6 +96,8 @@ enum PreviewTemplate {
     while (start < old.length && start < next.length && old[start].__src === nextSrc[start]) start++;
     var endOld = old.length - 1, endNew = next.length - 1;
     while (endOld >= start && endNew >= start && old[endOld].__src === nextSrc[endNew]) { endOld--; endNew--; }
+    for (var k = 0; k < start; k++) copyLines(next[k], old[k]);
+    for (var t = 1; endOld + t < old.length; t++) copyLines(next[endNew + t], old[endOld + t]);
     var anchor = old[endOld + 1] || null;
     for (var i = start; i <= endOld; i++) content.removeChild(old[i]);
     for (var j = start; j <= endNew; j++) {
@@ -138,10 +156,27 @@ enum PreviewTemplate {
     if (hits.length && current >= 0) {
       var target = hits[Math.min(current, hits.length - 1)];
       target.classList.add('current');
-      if (scroll) target.scrollIntoView({ block: 'center' });
+      if (scroll) {
+        var rect = target.getBoundingClientRect();
+        scrollPage(window.scrollY + rect.top - (window.innerHeight - rect.height) / 2);
+      }
     }
     return hits.length;
   };
+
+  // Every scroll the page makes itself goes through here, so the scroll events it causes can be
+  // told from the reader's: the page is where the page put it, or on its way to a heading.
+  var ownY = -1;
+  function scrollPage(top, smooth) {
+    var max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    ownY = Math.min(max, Math.max(0, top));
+    window.scrollTo({ top: ownY, behavior: scrollBehavior(smooth) });
+  }
+  function isOwnScroll() {
+    return Math.abs(window.scrollY - ownY) < 1 || (!!spyPin && !spyPin.arrived && Date.now() < spyPin.until);
+  }
+  // For the scroll sync script, which loads after this one.
+  window.lexmdPage = { isOwnScroll: isOwnScroll, isResizing: function () { return resizing; } };
 
   var indicator = document.createElement('div');
   indicator.id = 'lexmd-scroll';
@@ -160,38 +195,96 @@ enum PreviewTemplate {
     }
     if (found >= 0) anchor = { el: blocks[found], offset: blocks[found].getBoundingClientRect().top };
   }
-  function updateIndicator() {
+  // The thumb's size and place for the page's current scroll.
+  function thumbMetrics() {
     var view = window.innerHeight, total = document.documentElement.scrollHeight;
-    if (total <= view + 1) { indicator.classList.remove('visible'); return false; }
-    var thumb = Math.max(40, view * view / total);
-    var top = 4 + (window.scrollY / (total - view)) * (view - thumb - 8);
-    indicator.style.height = thumb + 'px';
-    indicator.style.transform = 'translateY(' + top + 'px)';
+    var thumb = Math.max(40, view * view / total), range = view - thumb - 8;
+    return { view: view, total: total, thumb: thumb, range: range, top: 4 + (window.scrollY / Math.max(1, total - view)) * range };
+  }
+  function updateIndicator() {
+    var m = thumbMetrics();
+    var scrolls = m.total > m.view + 1;
+    track.classList.toggle('idle', !scrolls);
+    if (!scrolls) { indicator.classList.remove('visible'); return false; }
+    indicator.style.height = m.thumb + 'px';
+    indicator.style.transform = 'translateY(' + m.top + 'px)';
     return true;
+  }
+  // The scroll bar shows while the page scrolls, and stays while the pointer is on it.
+  var overTrack = false, draggingThumb = false;
+  function hideSoon() {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(function () {
+      if (overTrack || draggingThumb) return;
+      indicator.classList.remove('visible');
+      indicator.classList.remove('wide');
+    }, 900);
   }
   window.addEventListener('scroll', function () {
     if (resizing) { updateIndicator(); return; }
     if (!updateIndicator()) return;
     indicator.classList.add('visible');
-    clearTimeout(hideTimer);
-    hideTimer = setTimeout(function () { indicator.classList.remove('visible'); }, 900);
+    hideSoon();
   }, { passive: true });
+
+  // In Split view this is the window's one scroll bar, so it can be dragged, and clicking the
+  // track jumps there. It scrolls the window directly, as the reader, so the editor follows.
+  var track = document.createElement('div');
+  track.id = 'lexmd-track';
+  track.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(track);
+  track.addEventListener('mouseenter', function () {
+    overTrack = true;
+    if (!updateIndicator()) return;
+    indicator.classList.add('visible');
+    indicator.classList.add('wide');
+    clearTimeout(hideTimer);
+  });
+  track.addEventListener('mouseleave', function () {
+    overTrack = false;
+    if (!draggingThumb) hideSoon();
+  });
+  track.addEventListener('mousedown', function (e) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    var m = thumbMetrics();
+    if (m.total <= m.view + 1 || m.range <= 0) return;
+    // Grabbing the thumb keeps the point under the pointer; clicking the track centers it there.
+    var grab = e.clientY >= m.top && e.clientY <= m.top + m.thumb ? e.clientY - m.top : m.thumb / 2;
+    function move(ev) {
+      var top = Math.min(Math.max(ev.clientY - grab - 4, 0), m.range);
+      window.scrollTo(0, top / m.range * (m.total - m.view));
+    }
+    function up() {
+      draggingThumb = false;
+      window.removeEventListener('mousemove', move, true);
+      window.removeEventListener('mouseup', up, true);
+      if (!overTrack) hideSoon();
+    }
+    draggingThumb = true;
+    window.addEventListener('mousemove', move, true);
+    window.addEventListener('mouseup', up, true);
+    move(e);
+  });
   window.addEventListener('resize', function () {
     resizing = true;
     if (anchor && anchor.el.isConnected) {
       var y = Math.round(window.scrollY + anchor.el.getBoundingClientRect().top - anchor.offset);
-      if (y !== Math.round(window.scrollY)) window.scrollTo(0, y);
+      if (y !== Math.round(window.scrollY)) scrollPage(y);
     }
     updateIndicator();
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(function () { resizing = false; queueSpy(); }, 200);
   });
 
-  window.lexmdScroll = function (f) {
+  // Scrolls to an offset, for the app: to follow the editor, or to restore a place.
+  window.lexmdScrollTo = function (y) {
     spyPin = null;
-    var max = document.documentElement.scrollHeight - window.innerHeight;
-    if (max > 0) window.scrollTo(0, Math.round(max * f));
+    scrollPage(y);
     captureAnchor();
+  };
+  window.lexmdScroll = function (f) {
+    window.lexmdScrollTo(Math.max(0, document.documentElement.scrollHeight - window.innerHeight) * f);
   };
 
   window.lexmdZoom = function (s) {
@@ -275,7 +368,7 @@ enum PreviewTemplate {
     var y = Math.round(Math.min(max, Math.max(0, window.scrollY + target.getBoundingClientRect().top - margin)));
     spyPin = { id: id, y: y, until: Date.now() + 1500, arrived: false };
     anchor = y > 0 ? { el: target, offset: target.getBoundingClientRect().top - (y - window.scrollY) } : null;
-    window.scrollTo({ top: y, behavior: scrollBehavior(smooth) });
+    scrollPage(y, smooth);
     reportHeading(id);
     return true;
   };

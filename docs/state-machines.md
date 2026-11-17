@@ -450,8 +450,43 @@ call `updateOutlineFit`.
 - each pane's `isHidden`;
 - `editor.pendingWhileHidden` (EditorController.swift:603), drained when the editor is unhidden.
 
-Scroll sync runs from the editor to the preview in Split mode only. It is suppressed while
-scrolling quietly, while a resize settles, and during a live resize. **Sound.**
+Scroll sync runs both ways in Split mode and is one machine, `ScrollSync`
+(ScrollSync.swift), over two panes that only measure and scroll (`ScrollSyncPane`: the editor in
+EditorController+SourcePositions.swift, the preview at the end of PreviewController.swift).
+
+**Places** are source positions: a line, counted from 1, plus the fraction of it passed, with 0
+the very top of a pane's document and `lines + 2` its end.
+
+- **Editor.** A line spans its wrapped rows (`sourcePosition(at:)`, `offset(ofSourcePosition:)`).
+- **Preview.** Innermost blocks carry `data-line` and `data-end`
+  (`MarkdownHTML.renderWithSourceLines`). The page reports where they are, and the app keeps
+  them as a `PositionMap`: a block's first line at its top edge, the line after its last at its
+  bottom edge. A paragraph therefore lines up edge to edge in both panes, and blank lines span
+  the gap between blocks.
+- **Lines** mean the same everywhere through `LineIndex` (LF, CRLF or a lone CR ends a line).
+
+**Variables:** `ScrollSync.isEnabled` (Split view), `lead` (the leading side, its position,
+when it last led, and a glide), and the preview's `pageLayout` (nil until the page reports).
+
+| From | Event | Guard | To | Side effects |
+|---|---|---|---|---|
+| any | a pane scrolls, `paneScrolled(side, input:)` | the other side doesn't hold the lead, or `input` | side leads | the other pane follows to the same position at the anchor |
+| other side leads | same, within `hold` (0.3 s) of its last scroll | no `input` | unchanged | ignored: the follower's layout settling, or the page keeping its place |
+| a side leads | first scroll of a lead, follower more than 2 px out of line | Reduce Motion off | same, gliding | the follower closes the distance over `catchUp` (0.25 s), by `step(at:)` |
+| any | `isEnabled` turns off | | idle | `lead` cleared; the page stops reporting |
+
+**Rules:**
+
+- **Anchor.** Both panes show the led position at the same height (`ScrollMetrics.anchorOffset`):
+  mid-height, sliding to the top edge at the start of the document and the bottom edge at its
+  end, so both ends line up and every part can be reached.
+- **Whose scroll.** The editor reports scrolls that aren't quiet, with whether the reader used
+  the wheel or keys in it. The page reports every scroll: one it made itself goes through
+  `scrollPage` and is recognized by where it lands, the others are the reader's, with whether
+  they used the wheel, keys or mouse.
+- **Suppressed** while a resize settles and during a live resize, as before.
+
+**Sound.**
 
 ### 4.7 Export, print and copy
 

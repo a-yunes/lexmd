@@ -54,7 +54,7 @@ struct PreviewLoadingTests {
         let long = (0..<200).map { "<p>Paragraph \($0)</p>" }.joined(separator: "\n")
         preview.render(html: long, baseURL: nil, resetScroll: true, document: "/doc.md", generation: 1)
         try await waitUntil(seconds: 10) { try await page(preview, "return document.querySelectorAll('#content p').length") as? Int == 200 }
-        preview.scroll(to: 0.6)
+        _ = try await world(preview, "lexmdScroll(0.6); return true")
         try await Task.sleep(for: .milliseconds(400))
         preview.setAllowsRemoteContent(true)
         try await waitUntil(seconds: 10) {
@@ -186,16 +186,4 @@ struct DocumentSchemeHandlerTests {
         try await waitUntil(seconds: 10) { script.error != nil }
         #expect(script.response == nil)
     }
-}
-
-/// Evaluates JavaScript in the page world, where document markup lives.
-@MainActor
-private func page(_ preview: PreviewController, _ body: String) async throws -> Any? {
-    try await preview.webView.callAsyncJavaScript(body, arguments: [:], in: nil, contentWorld: .page)
-}
-
-/// Evaluates JavaScript in LexMD's content world.
-@MainActor
-private func world(_ preview: PreviewController, _ body: String, _ arguments: [String: Any] = [:]) async throws -> Any? {
-    try await preview.webView.callAsyncJavaScript(body, arguments: arguments, in: nil, contentWorld: .world(name: "LexMD"))
 }

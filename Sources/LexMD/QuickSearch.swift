@@ -1,4 +1,5 @@
 import Foundation
+import LexMDRendering
 
 enum QuickMode: Hashable, Sendable {
     /// ⇧⌘F: file names and contents.
@@ -125,16 +126,16 @@ enum QuickSearchEngine {
             let found = matches(of: regex, in: text)
             guard !found.isEmpty else { continue }
             let ns = text as NSString
-            let lineStarts = Self.lineStarts(text)
+            let lineStarts = LineIndex(text)
             var count = 0
             for (occurrence, range) in found.enumerated() {
                 if count >= maxHitsPerFile || results.hits.count >= maxHits {
                     results.truncated = true
                     break
                 }
-                let lineIndex = Self.lineIndex(for: range.location, in: lineStarts)
-                let lineStart = lineStarts[lineIndex]
-                var lineEnd = lineIndex + 1 < lineStarts.count ? lineStarts[lineIndex + 1] - 1 : ns.length
+                let lineIndex = lineStarts.line(at: range.location)
+                let lineStart = lineStarts.starts[lineIndex]
+                var lineEnd = lineIndex + 1 < lineStarts.count ? lineStarts.starts[lineIndex + 1] - 1 : ns.length
                 if lineEnd > lineStart, ns.character(at: lineEnd - 1) == 13 { lineEnd -= 1 }
                 let lineText = ns.substring(with: NSRange(location: lineStart, length: max(0, lineEnd - lineStart)))
                 let lineLength = (lineText as NSString).length
@@ -158,25 +159,6 @@ enum QuickSearchEngine {
     /// A file's text, reused from the cache while the file is unchanged.
     static func read(_ path: String) -> String? {
         TextCache.shared.text(at: path)
-    }
-
-    static func lineStarts(_ text: String) -> [Int] {
-        var starts = [0]
-        var index = 0
-        for unit in text.utf16 {
-            index += 1
-            if unit == 10 { starts.append(index) }
-        }
-        return starts
-    }
-
-    static func lineIndex(for location: Int, in starts: [Int]) -> Int {
-        var low = 0, high = starts.count - 1
-        while low < high {
-            let mid = (low + high + 1) / 2
-            if starts[mid] <= location { low = mid } else { high = mid - 1 }
-        }
-        return low
     }
 
     /// Trims leading indentation and, for matches far into a long line, the text before them.
