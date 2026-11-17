@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.4
+
+- In Split view the editor and the preview scroll together, whichever one you scroll. Both show
+  the same part of the document at the same height, and a paragraph lines up from its first
+  line to its last even when images or diagrams make one side taller.
+- Double-click a word in the preview to edit it: the editor selects that word in the source and
+  takes focus. From Preview Only, the editor opens beside the preview first.
+- Split view has one scroll bar, at the window's edge, and the preview's scroll bar can be
+  dragged.
+- Find in Files shows the right line for files that use old Mac line endings.
+
 ## 1.1.3
 
 - Text that couldn't be saved is never replaced: opening another document puts it in a new tab,
