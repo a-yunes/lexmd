@@ -6,6 +6,12 @@ import WebKit
 final class PreviewController: NSObject, WKNavigationDelegate {
     let webView: WKWebView
     var onOpenURL: ((URL) -> Void)?
+    /// The page scrolled, and not because it was told to. The argument says the reader used the
+    /// wheel, keys or mouse on it; see `ScrollSync`.
+    var onReaderScroll: ((_ input: Bool) -> Void)?
+    /// The reader double-clicked a block: its source lines (counted from 1), and the word the
+    /// double-click selected.
+    var onEditRequest: ((_ lines: ClosedRange<Int>, _ word: String) -> Void)?
     /// The number of matches the page marked, and the document the page showed then.
     var onHighlightCount: ((Int, String?) -> Void)?
     /// The id of the heading in view as the preview scrolls (empty above the first heading).
@@ -45,6 +51,14 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     /// The document and render that the next flush sends, and the ones the page shows.
     private var lastDocument: String?
     private var lastGeneration = 0
+    /// The rendered text's number of lines, which ends the page's map of source positions.
+    private var lastLineCount = 0
+    /// The page's layout and scroll offset, as it last reported them while `reportsScrolling`.
+    private var pageLayout: PageLayout?
+    private var reportsScrolling = false
+    /// A scroll sent to the page that it hasn't run yet, and the latest one waiting after it.
+    private var isScrollInFlight = false
+    private var pendingScroll: CGFloat?
     private(set) var shownDocument: String?
     private(set) var shownGeneration = -1
     /// How far the page was last scrolled, as it reported; restored after the page reloads.
@@ -82,6 +96,9 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         ))
         content.addUserScript(WKUserScript(
             source: PreviewTemplate.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Self.world
+        ))
+        content.addUserScript(WKUserScript(
+            source: PreviewTemplate.scrollSyncScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Self.world
         ))
         configuration.userContentController = content
         // Tab moves through links and buttons, such as a code block's Copy button.
@@ -138,6 +155,9 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     }
 
     private func loadTemplate() {
+        isScrollInFlight = false
+        pendingScroll = nil
+        pageLayout = nil
         // The page that comes back shows nothing until the next flush.
         if shownDocument != nil, pendingScrollFraction == nil, pendingHeading == nil {
             // Keep the reader's place across the reload; the flush after it reapplies it.
@@ -161,9 +181,10 @@ final class PreviewController: NSObject, WKNavigationDelegate {
 
     /// `document` and `generation` identify the render, so callers can tell whether the page
     /// shows it yet (see `shows(_:generation:)`).
-    func render(html: String, baseURL: URL?, resetScroll: Bool, document: String? = nil, generation: Int = 0) {
+    func render(html: String, baseURL: URL?, resetScroll: Bool, document: String? = nil, generation: Int = 0, lineCount: Int = 0) {
         let baseChanged = baseURL != lastBase
         lastHTML = html
+        lastLineCount = lineCount
         lastBase = baseURL
         lastDocument = document
         lastGeneration = generation
@@ -259,11 +280,6 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         }
     }
 
-    func scroll(to fraction: CGFloat) {
-        guard isLoaded else { return }
-        call("lexmdScroll(f)", ["f": Double(fraction)])
-    }
-
     /// Reports how far the page is scrolled, from 0 to 1, when it shows `document`.
     func readScrollFraction(of document: String, _ completion: @escaping (Double) -> Void) {
         guard shows(document) else { return }
@@ -325,6 +341,15 @@ final class PreviewController: NSObject, WKNavigationDelegate {
             onHeadingChange?(id)
         } else if type == "scroll", let fraction = body["f"] as? Double {
             lastScrollFraction = fraction
+        } else if type == "layout", reportsScrolling, let layout = PageLayout(body, lineCount: lastLineCount) {
+            // A report already on its way when reporting was turned off is dropped.
+            pageLayout = layout
+        } else if type == "scrolled", reportsScrolling, let scroll = (body["scroll"] as? NSNumber)?.doubleValue {
+            pageLayout?.scroll = scroll
+            if body["reader"] as? Bool == true { onReaderScroll?(body["input"] as? Bool == true) }
+        } else if type == "edit", let line = (body["line"] as? NSNumber)?.intValue {
+            let end = (body["end"] as? NSNumber)?.intValue ?? line
+            onEditRequest?(line...max(line, end), body["word"] as? String ?? "")
         }
     }
 
@@ -341,6 +366,7 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         waiters.forEach { $0.resume(returning: true) }
         call("lexmdZoom(s)", ["s": scale])
         applyPageOptions()
+        applyScrollReporting()
         pendingReset = true
         flush()
     }
@@ -466,5 +492,78 @@ private final class ScriptMessageProxy: NSObject, WKScriptMessageHandler {
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         target?.receive(message)
+    }
+}
+
+// MARK: - Scroll sync
+
+/// Where the page's blocks are and how far it is scrolled, as its script reports them.
+private struct PageLayout {
+    /// Source positions from the very top of the page (0) to its very end (`lineCount + 2`),
+    /// with each block's lines at its top and bottom edges in between.
+    var map: PositionMap
+    var scroll: CGFloat
+    var view: CGFloat
+    var height: CGFloat
+
+    /// `lineCount` is the number of lines in the rendered source.
+    init?(_ message: [String: Any], lineCount: Int) {
+        guard let flat = message["anchors"] as? [NSNumber], let scroll = message["scroll"] as? NSNumber,
+              let view = message["view"] as? NSNumber, let height = message["height"] as? NSNumber else { return nil }
+        self.scroll = CGFloat(scroll.doubleValue)
+        self.view = CGFloat(view.doubleValue)
+        self.height = CGFloat(height.doubleValue)
+        var pairs: [(position: Double, offset: CGFloat)] = [(0, 0)]
+        for index in stride(from: 0, to: flat.count - 1, by: 2) {
+            pairs.append((flat[index].doubleValue, CGFloat(flat[index + 1].doubleValue)))
+        }
+        pairs.append((Double(lineCount + 2), self.height))
+        map = PositionMap(pairs)
+    }
+}
+
+extension PreviewController: ScrollSyncPane {
+    var syncMetrics: ScrollMetrics? {
+        pageLayout.map { ScrollMetrics(scroll: $0.scroll, view: $0.view, max: max(0, $0.height - $0.view)) }
+    }
+
+    func sourcePosition(at offset: CGFloat) -> Double? {
+        pageLayout?.map.position(at: offset)
+    }
+
+    func offset(ofSourcePosition position: Double) -> CGFloat? {
+        pageLayout?.map.offset(of: position)
+    }
+
+    func followScroll(to scroll: CGFloat) {
+        guard isLoaded, let current = pageLayout?.scroll, abs(scroll - current) >= 0.5 else { return }
+        pageLayout?.scroll = scroll
+        // The editor reports every frame of a scroll. Calls the page hasn't run yet would queue up
+        // and make it trail behind, so only the latest scroll waits for the one in flight.
+        if isScrollInFlight { pendingScroll = scroll } else { send(scroll) }
+    }
+
+    private func send(_ scroll: CGFloat) {
+        isScrollInFlight = true
+        webView.callAsyncJavaScript("lexmdScrollTo(y)", arguments: ["y": Double(scroll)], in: nil, in: Self.world) { [weak self] _ in
+            guard let self else { return }
+            self.isScrollInFlight = false
+            guard let pending = self.pendingScroll else { return }
+            self.pendingScroll = nil
+            self.send(pending)
+        }
+    }
+
+    func setReportsScrolling(_ reports: Bool) {
+        reportsScrolling = reports
+        if !reports { pageLayout = nil }
+        applyScrollReporting()
+    }
+
+    /// Tells the page whether to report its layout and scrolls; a page that has just loaded
+    /// reports nothing until told.
+    private func applyScrollReporting() {
+        guard isLoaded else { return }
+        call("lexmdSync(on)", ["on": reportsScrolling])
     }
 }

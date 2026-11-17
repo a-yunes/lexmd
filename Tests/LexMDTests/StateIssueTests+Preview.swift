@@ -67,7 +67,7 @@ extension TabCommandTests {
         try await waitUntil { (try await pageText(model)).contains("of b.") }
         model.selectTab(ids[0])
         try await waitUntil { (try await pageText(model)).contains("of a.") }
-        model.preview.scroll(to: 0.8)
+        _ = try await world(model.preview, "lexmdScroll(0.8); return true")
         try await Task.sleep(for: .milliseconds(300))
         let bBefore = model.tabStore.list.tab(ids[1])?.state.previewFraction ?? 0
 

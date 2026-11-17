@@ -1,5 +1,7 @@
 import AppKit
 import Foundation
+import WebKit
+@testable import LexMD
 
 /// A temporary folder removed when the value is released.
 final class TestFolder {
@@ -45,4 +47,38 @@ func waitUntil(seconds: Double = 30, _ condition: () async throws -> Bool) async
         try await Task.sleep(for: .milliseconds(50))
     }
     throw TimedOut()
+}
+
+/// Evaluates JavaScript in the preview's page world, where document markup lives.
+@MainActor
+func page(_ preview: PreviewController, _ body: String, _ arguments: [String: Any] = [:]) async throws -> Any? {
+    try await preview.webView.callAsyncJavaScript(body, arguments: arguments, in: nil, contentWorld: .page)
+}
+
+/// Evaluates JavaScript in LexMD's own content world, where the preview's scripts run.
+@MainActor
+func world(_ preview: PreviewController, _ body: String, _ arguments: [String: Any] = [:]) async throws -> Any? {
+    try await preview.webView.callAsyncJavaScript(body, arguments: arguments, in: nil, contentWorld: .world(name: "LexMD"))
+}
+
+/// Puts the shared model's editor in a window of its own for a test (for a responder chain,
+/// an undo manager, or a size), and puts it back where it was with `restore()`.
+@MainActor
+final class EditorHost {
+    let window: NSWindow
+    private let editor: NSView
+    private let previousSuperview: NSView?
+
+    init(_ model: AppModel, width: CGFloat = 600, height: CGFloat = 400) {
+        editor = model.editor.scrollView
+        previousSuperview = editor.superview
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = editor
+    }
+
+    func restore() {
+        window.contentView = nil
+        previousSuperview?.addSubview(editor)
+    }
 }

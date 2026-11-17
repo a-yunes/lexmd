@@ -12,24 +12,47 @@ package protocol MarkdownLinkRendering {
 package enum MarkdownHTML {
     /// `links` resolves wiki links and marks broken local links; without it they render as text.
     package static func render(_ source: String, links: (any MarkdownLinkRendering)? = nil) -> String {
-        var body = source
-        var prefix = ""
-        if let split = FrontMatter.split(source) {
-            let (frontMatter, rest) = (split.yaml, split.rest)
-            prefix = FrontMatter.html(frontMatter) ?? "<pre class=\"frontmatter\"><code>\(escape(frontMatter))</code></pre>\n"
-            body = rest
+        render(source, links: links, sourceLines: false)
+    }
+
+    /// HTML whose blocks say which lines of the source they were rendered from, and how many
+    /// lines the source has.
+    package struct SourceMapped: Sendable {
+        package var html: String
+        package var lineCount: Int
+    }
+
+    /// Renders for the live preview: each innermost block (a paragraph, a heading, a table row, a
+    /// code block) carries `data-line`, the line of `source` it starts on (the first line is 1),
+    /// and `data-end`, its last line, when it spans several. The preview and the editor use them
+    /// to scroll to the same place.
+    package static func renderWithSourceLines(_ source: String, links: (any MarkdownLinkRendering)? = nil) -> SourceMapped {
+        SourceMapped(html: render(source, links: links, sourceLines: true), lineCount: LineIndex(utf8: Array(source.utf8)).count)
+    }
+
+    private static func render(_ source: String, links: (any MarkdownLinkRendering)?, sourceLines: Bool) -> String {
+        guard let split = FrontMatter.split(source) else {
+            return renderBody(source, footnotes: true, links: links, lineOffset: sourceLines ? 0 : nil)
         }
-        return prefix + renderBody(body, footnotes: true, links: links)
+        let lines = sourceLines ? " data-line=\"1\" data-end=\"\(split.lineCount)\"" : ""
+        let properties = FrontMatter.html(split.yaml, attributes: lines)
+            ?? "<pre\(lines) class=\"frontmatter\"><code>\(escape(split.yaml))</code></pre>\n"
+        return properties + renderBody(split.rest, footnotes: true, links: links, lineOffset: sourceLines ? split.lineCount : nil)
     }
 
     /// Renders Markdown with math, diagrams, and optionally footnotes (see `MarkdownExtensions`).
     /// Footnote bodies get the same link context, so their wiki links and broken links render too.
-    package static func renderBody(_ source: String, footnotes: Bool, links: (any MarkdownLinkRendering)? = nil) -> String {
+    /// With `lineOffset`, the number of lines before `source` in its document, blocks carry
+    /// their lines.
+    package static func renderBody(
+        _ source: String, footnotes: Bool, links: (any MarkdownLinkRendering)? = nil, lineOffset: Int? = nil
+    ) -> String {
         let extensions = MarkdownExtensions(source, footnotes: footnotes)
         let document = extensions.document ?? Document(parsing: extensions.source)
         var renderer = HTMLRenderer()
         renderer.extensions = extensions
         renderer.links = links
+        renderer.lineOffset = lineOffset
         renderer.visit(document)
         return extensions.finish(renderer.result) + extensions.footnotesHTML { renderBody($0, footnotes: false, links: links) }
     }
@@ -88,8 +111,20 @@ private struct HTMLRenderer: MarkupWalker {
     private var alignments: [Table.ColumnAlignment?] = []
     private var column = 0
     var extensions = MarkdownExtensions("")
+    /// Lines before the rendered text (front matter), when blocks carry their lines.
+    var lineOffset: Int?
 
     private func esc(_ s: String) -> String { MarkdownHTML.escape(s) }
+
+    /// An innermost block's lines in the document as attributes: ` data-line="N"` for the line
+    /// it starts on, and ` data-end="M"` for its last line when it spans several. "" without
+    /// source lines. Blocks that only hold other blocks (lists, quotes) carry none.
+    private func lines(of markup: Markup) -> String {
+        guard let lineOffset, let range = markup.range else { return "" }
+        let lines = extensions.originalLines(of: range)
+        let start = lines.lowerBound + lineOffset
+        return " data-line=\"\(start)\"" + (lines.count > 1 ? " data-end=\"\(lines.upperBound + lineOffset)\"" : "")
+    }
 
     private mutating func capture(_ markup: Markup) -> String {
         let saved = result
@@ -117,28 +152,47 @@ private struct HTMLRenderer: MarkupWalker {
     mutating func visitHeading(_ heading: Heading) {
         let id = slug(for: extensions.restore(heading.plainText))
         let inner = capture(heading)
-        result += "<h\(heading.level) id=\"\(esc(id))\">\(inner)</h\(heading.level)>\n"
+        result += "<h\(heading.level)\(lines(of: heading)) id=\"\(esc(id))\">\(inner)</h\(heading.level)>\n"
     }
 
     mutating func visitParagraph(_ paragraph: Paragraph) {
-        result += "<p>\(capture(paragraph))</p>\n"
+        // A paragraph that is one display formula renders as a block of its own.
+        if paragraph.childCount == 1, let text = paragraph.child(at: 0) as? Text,
+           let math = extensions.soleDisplayMath(in: text.string) {
+            result += MarkdownExtensions.html(for: math, block: true, attributes: lines(of: paragraph)) + "\n"
+            return
+        }
+        result += "<p\(lines(of: paragraph))>\(capture(paragraph))</p>\n"
+    }
+
+    private static let calloutTitles = ["NOTE": "Note", "TIP": "Tip", "IMPORTANT": "Important", "WARNING": "Warning", "CAUTION": "Caution"]
+
+    /// The kind of callout a quote is, from the `[!KIND]` its first paragraph starts with, and
+    /// that marker's length.
+    private static func callout(_ blockQuote: BlockQuote) -> (kind: String, markerLength: Int)? {
+        guard let paragraph = blockQuote.child(at: 0) as? Paragraph, let text = paragraph.child(at: 0) as? Text,
+              text.string.hasPrefix("[!"), let close = text.string.firstIndex(of: "]") else { return nil }
+        let kind = text.string[text.string.index(text.string.startIndex, offsetBy: 2)..<close].uppercased()
+        guard calloutTitles[kind] != nil else { return nil }
+        return (kind, text.string.distance(from: text.string.startIndex, to: close) + 1)
     }
 
     mutating func visitBlockQuote(_ blockQuote: BlockQuote) {
-        let inner = capture(blockQuote)
-        let kinds = ["NOTE": "Note", "TIP": "Tip", "IMPORTANT": "Important", "WARNING": "Warning", "CAUTION": "Caution"]
-        if inner.hasPrefix("<p>[!"), let close = inner.firstIndex(of: "]") {
-            let start = inner.index(inner.startIndex, offsetBy: 5)
-            let kind = String(inner[start..<close]).uppercased()
-            if let title = kinds[kind] {
-                var rest = String(inner[inner.index(after: close)...])
-                while rest.first == "\n" || rest.first == " " { rest.removeFirst() }
-                if rest.hasPrefix("</p>") { rest = String(rest.dropFirst(4)) } else { rest = "<p>" + rest }
-                result += "<div class=\"callout callout-\(kind.lowercased())\"><div class=\"callout-title\">\(title)</div>\n\(rest)</div>\n"
-                return
-            }
+        guard let (kind, markerLength) = Self.callout(blockQuote), let first = blockQuote.child(at: 0) else {
+            result += "<blockquote>\n\(capture(blockQuote))</blockquote>\n"
+            return
         }
-        result += "<blockquote>\n\(inner)</blockquote>\n"
+        // The first paragraph without its marker; a marker on a line of its own leaves none.
+        var opening = String(capture(first).dropFirst(markerLength))
+        while opening.first == "\n" || opening.first == " " { opening.removeFirst() }
+        let saved = result
+        result = ""
+        for child in blockQuote.children.dropFirst() { visit(child) }
+        let rest = result
+        result = saved
+        result += "<div class=\"callout callout-\(kind.lowercased())\"><div class=\"callout-title\">\(Self.calloutTitles[kind] ?? "")</div>\n"
+        result += opening.isEmpty ? "\n" : "<p\(lines(of: first))>\(opening)</p>\n"
+        result += rest + "</div>\n"
     }
 
     mutating func visitCodeBlock(_ codeBlock: CodeBlock) {
@@ -146,13 +200,14 @@ private struct HTMLRenderer: MarkupWalker {
         var code = codeBlock.code
         if code.hasSuffix("\n") { code.removeLast() }
         if language.lowercased() == "math" {
-            result += MarkdownExtensions.html(for: .math(tex: code, display: true, source: code), block: true) + "\n"
+            result += MarkdownExtensions.html(for: .math(tex: code, display: true, source: code), block: true, attributes: lines(of: codeBlock)) + "\n"
             return
         }
         let langClass = language.isEmpty ? "" : " class=\"language-\(esc(language))\""
         let label = language.isEmpty ? "" : "<span class=\"lang\">\(esc(language))</span>"
-        let block = "<div class=\"codeblock\">\(label)<button class=\"copy\" type=\"button\">Copy</button><pre><code\(langClass)>\(esc(code))</code></pre></div>"
-        result += MarkdownHTML.isDiagram(language) ? "<div class=\"lexmd-diagram\">\(block)</div>\n" : block + "\n"
+        let isDiagram = MarkdownHTML.isDiagram(language)
+        let block = "<div\(isDiagram ? "" : lines(of: codeBlock)) class=\"codeblock\">\(label)<button class=\"copy\" type=\"button\">Copy</button><pre><code\(langClass)>\(esc(code))</code></pre></div>"
+        result += isDiagram ? "<div\(lines(of: codeBlock)) class=\"lexmd-diagram\">\(block)</div>\n" : block + "\n"
     }
 
     mutating func visitHTMLBlock(_ html: HTMLBlock) {
@@ -160,7 +215,7 @@ private struct HTMLRenderer: MarkupWalker {
     }
 
     mutating func visitThematicBreak(_ thematicBreak: ThematicBreak) {
-        result += "<hr>\n"
+        result += "<hr\(lines(of: thematicBreak))>\n"
     }
 
     mutating func visitOrderedList(_ orderedList: OrderedList) {
@@ -192,7 +247,7 @@ private struct HTMLRenderer: MarkupWalker {
     mutating func visitTableHead(_ tableHead: Table.Head) {
         inTableHead = true
         column = 0
-        result += "<thead><tr>\(capture(tableHead))</tr></thead>\n"
+        result += "<thead><tr\(lines(of: tableHead))>\(capture(tableHead))</tr></thead>\n"
         inTableHead = false
     }
 
@@ -203,7 +258,7 @@ private struct HTMLRenderer: MarkupWalker {
 
     mutating func visitTableRow(_ tableRow: Table.Row) {
         column = 0
-        result += "<tr>\(capture(tableRow))</tr>\n"
+        result += "<tr\(lines(of: tableRow))>\(capture(tableRow))</tr>\n"
     }
 
     mutating func visitTableCell(_ tableCell: Table.Cell) {

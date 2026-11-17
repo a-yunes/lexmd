@@ -546,12 +546,9 @@ extension TabCommandTests {
         try folder.write("t.md", "# T\n")
         let (model, path) = try await project(folder, files: 2)
         model.open(URL(fileURLWithPath: path("a.md")))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
-        let previousSuperview = model.editor.scrollView.superview
-        window.contentView = model.editor.scrollView
+        let host = EditorHost(model)
         defer {
-            window.contentView = nil
-            if let previousSuperview { previousSuperview.addSubview(model.editor.scrollView) }
+            host.restore()
         }
         let undo = try #require(model.fileUndoManager)
         undo.removeAllActions()
@@ -622,12 +619,9 @@ extension TabCommandTests {
         try folder.write("a.md", "# A\n")
         let (model, path) = try await project(folder, files: 1)
         model.open(URL(fileURLWithPath: path("a.md")))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
-        let previousSuperview = model.editor.scrollView.superview
-        window.contentView = model.editor.scrollView
+        let host = EditorHost(model)
         defer {
-            window.contentView = nil
-            if let previousSuperview { previousSuperview.addSubview(model.editor.scrollView) }
+            host.restore()
         }
         let undo = try #require(model.fileUndoManager)
         undo.removeAllActions()

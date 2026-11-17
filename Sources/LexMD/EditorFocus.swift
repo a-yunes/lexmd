@@ -166,7 +166,7 @@ extension EditorController {
 
     /// The scroll offset that centers `caretMidY`, clamped to the scrollable range.
     static func centeredOffset(caretMidY: CGFloat, visibleHeight: CGFloat, documentHeight: CGFloat, topInset: CGFloat) -> CGFloat {
-        clampedOffset(caretMidY - visibleHeight / 2, visibleHeight: visibleHeight, documentHeight: documentHeight, topInset: topInset)
+        clampedOffset(caretMidY - visibleHeight / 2, visibleHeight: visibleHeight, documentHeight: documentHeight, topInset: topInset, scale: 1)
     }
 
     // MARK: Spelling and grammar

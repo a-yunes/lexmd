@@ -33,6 +33,10 @@ package struct MarkdownExtensions {
     package private(set) var itemRanges: [Range<Int>] = []
     /// Referenced footnotes in numbering order.
     package private(set) var footnotes: [Footnote] = []
+    /// Tokens that replaced syntax spanning several lines (display math, for example): each
+    /// one's line in `source`, in order, and the line breaks taken out by the first n of them.
+    private var shiftLines: [Int] = []
+    private var shiftTotals = [0]
     /// The parse of `source` when scanning parsed it and replaced nothing, so it need not be parsed again.
     package private(set) var document: Document?
 
@@ -46,7 +50,8 @@ package struct MarkdownExtensions {
         guard mayHaveMath || mayHaveFootnotes else { return }
 
         let bytes = Array(source.utf8)
-        let lineStarts = Self.lineStarts(bytes)
+        let lines = LineIndex(utf8: bytes)
+        let lineStarts = lines.starts
         let parsed = Document(parsing: source)
         var skip = Self.protectedRanges(parsed, bytes: bytes, lineStarts: lineStarts)
         var definitions: [String: Footnote] = [:]
@@ -117,6 +122,33 @@ package struct MarkdownExtensions {
         } else {
             document = parsed
         }
+        for range in itemRanges where !range.isEmpty {
+            let first = lines.line(at: range.lowerBound)
+            let removed = lines.line(at: range.upperBound - 1) - first
+            guard removed > 0 else { continue }
+            // Lines count from 1; the token sits on its first line, moved up by earlier tokens.
+            shiftLines.append(first + 1 - shiftTotals[shiftTotals.count - 1])
+            shiftTotals.append(shiftTotals[shiftTotals.count - 1] + removed)
+        }
+    }
+
+    /// The lines in the original text of a block at `range` in `source` (lines count from 1).
+    /// A token that replaced several lines moves what follows it down by the line breaks it took
+    /// out: blocks on later lines, and the end of a block that the token itself is in.
+    package func originalLines(of range: SourceRange) -> ClosedRange<Int> {
+        let start = range.lowerBound.line + removedLines(byTokensBefore: range.lowerBound.line)
+        let end = range.upperBound.line + removedLines(byTokensBefore: range.upperBound.line + 1)
+        return start...max(start, end)
+    }
+
+    /// The line breaks taken out by tokens on lines of `source` before `line`.
+    private func removedLines(byTokensBefore line: Int) -> Int {
+        var low = 0, high = shiftLines.count
+        while low < high {
+            let mid = (low + high) / 2
+            if shiftLines[mid] < line { low = mid + 1 } else { high = mid }
+        }
+        return shiftTotals[low]
     }
 
     /// Whether the text holds `[^`.
@@ -163,36 +195,41 @@ package struct MarkdownExtensions {
         return out + text[last...]
     }
 
-    /// Replaces tokens in rendered HTML. A paragraph holding only display math becomes a block.
+    /// The display math that `text`, a paragraph's only text, consists of, when it is nothing
+    /// else. Such a paragraph renders as a block.
+    package func soleDisplayMath(in text: String) -> Item? {
+        var sole: Item?
+        var count = 0
+        forEachToken(in: text) { range, item in
+            count += 1
+            if range == text.startIndex..<text.endIndex { sole = item }
+        }
+        guard count == 1, case .math(_, true, _)? = sole else { return nil }
+        return sole
+    }
+
+    /// Replaces tokens in rendered HTML.
     package func finish(_ html: String) -> String {
         guard !items.isEmpty, html.unicodeScalars.contains(Self.tokenStart) else { return html }
         var out = ""
         out.reserveCapacity(html.utf8.count)
         var last = html.startIndex
         forEachToken(in: html) { range, item in
-            var lower = range.lowerBound
-            var upper = range.upperBound
-            var block = false
-            if case .math(_, true, _) = item,
-               html[last..<lower].hasSuffix("<p>"), html[upper...].hasPrefix("</p>") {
-                lower = html.index(lower, offsetBy: -3)
-                upper = html.index(upper, offsetBy: 4)
-                block = true
-            }
-            out += html[last..<lower]
-            out += Self.html(for: item, block: block)
-            last = upper
+            out += html[last..<range.lowerBound]
+            out += Self.html(for: item)
+            last = range.upperBound
         }
         return out + html[last...]
     }
 
-    package static func html(for item: Item, block: Bool = false) -> String {
+    /// `attributes` go on a block's tag, as in `" data-line=\"12\""`.
+    package static func html(for item: Item, block: Bool = false, attributes: String = "") -> String {
         let esc = MarkdownHTML.escape
         switch item {
         case let .math(tex, display, source):
             if display {
                 let tag = block ? "div" : "span"
-                return "<\(tag) class=\"lexmd-math lexmd-display\" data-tex=\"\(esc(tex))\">\(esc(source))</\(tag)>"
+                return "<\(tag)\(attributes) class=\"lexmd-math lexmd-display\" data-tex=\"\(esc(tex))\">\(esc(source))</\(tag)>"
             }
             return "<span class=\"lexmd-math\" data-tex=\"\(esc(tex))\">\(esc(source))</span>"
         case let .footnoteRef(number, occurrence, _):
@@ -287,13 +324,6 @@ package struct MarkdownExtensions {
     }
 
     private static func normalize(_ label: String) -> String { label.lowercased() }
-
-    /// Byte offsets where each line starts.
-    private static func lineStarts(_ bytes: [UInt8]) -> [Int] {
-        var starts = [0]
-        for (i, b) in bytes.enumerated() where b == 0x0A { starts.append(i + 1) }
-        return starts
-    }
 
     /// Byte ranges of code and raw HTML, where extension syntax is left alone.
     private static func protectedRanges(_ document: Document, bytes: [UInt8], lineStarts: [Int]) -> [Range<Int>] {
@@ -499,7 +529,8 @@ package enum FrontMatter {
         return result.isEmpty ? nil : result
     }
 
-    package static func html(_ yaml: String) -> String? {
+    /// `attributes` go on the table's outer tag, as in `" data-line=\"1\""`.
+    package static func html(_ yaml: String, attributes: String = "") -> String? {
         guard let properties = properties(yaml) else { return nil }
         let esc = MarkdownHTML.escape
         var rows = ""
@@ -511,7 +542,7 @@ package enum FrontMatter {
             }
             rows += "<tr><th scope=\"row\">\(esc(key))</th><td>\(cell)</td></tr>\n"
         }
-        return "<div class=\"properties\"><table>\n<tbody>\n\(rows)</tbody>\n</table></div>\n"
+        return "<div\(attributes) class=\"properties\"><table>\n<tbody>\n\(rows)</tbody>\n</table></div>\n"
     }
 
     /// The colon after a plain key like `title` or `published date`.

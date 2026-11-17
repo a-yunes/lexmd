@@ -102,9 +102,3 @@ struct PreviewSecurityTests {
         #expect(DocumentSchemeHandler.byteRange("bytes=0-1,4-5", size: 1000) == nil)
     }
 }
-
-/// Evaluates JavaScript in the page world, where document markup lives.
-@MainActor
-private func page(_ preview: PreviewController, _ body: String) async throws -> Any? {
-    try await preview.webView.callAsyncJavaScript(body, arguments: [:], in: nil, contentWorld: .page)
-}

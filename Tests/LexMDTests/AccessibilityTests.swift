@@ -155,8 +155,3 @@ struct PreviewAccessibilityTests {
         #expect(selectors.contains(":root"))
     }
 }
-
-@MainActor
-private func page(_ preview: PreviewController, _ body: String, _ arguments: [String: Any] = [:]) async throws -> Any? {
-    try await preview.webView.callAsyncJavaScript(body, arguments: arguments, in: nil, contentWorld: .page)
-}

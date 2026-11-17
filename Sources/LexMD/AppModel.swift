@@ -69,7 +69,10 @@ final class AppModel {
     private(set) var wordCount = 0
     var saveError: String?
     private(set) var viewMode: ViewMode = .read {
-        didSet { updateOutlineFit() }
+        didSet {
+            updateOutlineFit()
+            scrollSync.isEnabled = viewMode == .split
+        }
     }
     private(set) var fontScale: Double = 1
     private(set) var recentFolders: [String] = []
@@ -231,6 +234,8 @@ final class AppModel {
     let outline = OutlineModel()
 
     let editor = EditorController()
+    /// Keeps the editor and the preview scrolled to the same place in Split view.
+    @ObservationIgnored let scrollSync = ScrollSync()
     let preview = PreviewController(allowsRemoteContent: UserDefaults.standard.bool(forKey: Keys.loadsRemoteContent))
     let updates = UpdateService()
     var isOnboardingPresented = false
@@ -342,10 +347,7 @@ final class AppModel {
             self.closeFindBar()
             return true
         }
-        editor.onScroll = { [weak self] fraction in
-            guard let self, self.viewMode == .split else { return }
-            self.preview.scroll(to: fraction)
-        }
+        configureScrollSync()
         preview.onOpenURL = { [weak self] url in self?.openLink(url) }
         preview.onHighlightCount = { [weak self] count, document in
             // A count from a page still showing the previous document says nothing about this one.
@@ -1084,14 +1086,17 @@ final class AppModel {
                 try? await Task.sleep(nanoseconds: 90_000_000)
                 guard !Task.isCancelled else { return }
             }
-            let (html, words) = await runDetached {
-                (MarkdownHTML.render(source, links: links), MarkdownHTML.wordCount(source))
+            let (rendered, words) = await runDetached {
+                (MarkdownHTML.renderWithSourceLines(source, links: links), MarkdownHTML.wordCount(source))
             }
             guard let self, !Task.isCancelled else { return }
             let reset = self.pendingScrollReset
             self.pendingScrollReset = false
             self.preview.setDocumentTitle(self.currentFile == nil ? "" : self.title)
-            self.preview.render(html: html, baseURL: base, resetScroll: reset, document: document, generation: generation)
+            self.preview.render(
+                html: rendered.html, baseURL: base, resetScroll: reset, document: document, generation: generation,
+                lineCount: rendered.lineCount
+            )
             if self.wordCount != words { self.wordCount = words }
         }
     }

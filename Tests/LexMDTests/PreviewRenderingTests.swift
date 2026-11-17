@@ -474,15 +474,3 @@ struct PreviewRenderingTests {
         #expect(try await page(preview, "return document.querySelectorAll('.lexmd-diagram-view svg').length") as? Int ?? 0 >= 2)
     }
 }
-
-/// Evaluates JavaScript in the page world, where document markup lives.
-@MainActor
-private func page(_ preview: PreviewController, _ body: String) async throws -> Any? {
-    try await preview.webView.callAsyncJavaScript(body, arguments: [:], in: nil, contentWorld: .page)
-}
-
-/// Evaluates JavaScript in LexMD's own content world.
-@MainActor
-private func world(_ preview: PreviewController, _ body: String, _ arguments: [String: Any] = [:]) async throws -> Any? {
-    try await preview.webView.callAsyncJavaScript(body, arguments: arguments, in: nil, contentWorld: .world(name: "LexMD"))
-}

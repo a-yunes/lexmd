@@ -1,4 +1,5 @@
 import AppKit
+import LexMDRendering
 
 /// Plain-text view that keeps lines at a comfortable reading measure by centering the text column.
 final class LexMDTextView: NSTextView {
@@ -6,6 +7,13 @@ final class LexMDTextView: NSTextView {
     /// Extra space below the text so the last line can scroll to the middle (typewriter scrolling).
     var bottomOverscroll: CGFloat = 0 { didSet { if bottomOverscroll != oldValue { updateInsets() } } }
     weak var editor: EditorController?
+    /// The reader pressed a key in the editor, which may scroll it (typing, arrows, Page Down).
+    var onKeyDown: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        onKeyDown?()
+        super.keyDown(with: event)
+    }
 
     override func setFrameSize(_ newSize: NSSize) {
         var size = newSize
@@ -39,7 +47,14 @@ final class EditorController: NSObject, NSTextViewDelegate {
     let textView: LexMDTextView
 
     var onTextChange: ((String) -> Void)?
-    var onScroll: ((CGFloat) -> Void)?
+    /// The reader scrolled the editor, or it scrolled for a reason other than following the
+    /// preview. The argument says the reader used the wheel or keys in the editor since the last
+    /// report; see `ScrollSync`.
+    var onScroll: ((_ input: Bool) -> Void)?
+    /// The reader used the wheel or keys in the editor since its last scroll report.
+    private var hadReaderInput = false
+    /// Where each source line starts, for the text version it was computed from.
+    var lineIndexCache: (version: Int, index: LineIndex)?
     /// Called when the reader moves the text in view, including quiet scrolls. A resize is not
     /// a move: the text reflows under a fixed origin and settles once the resize ends.
     var onVisibleTextMove: (() -> Void)?
@@ -133,6 +148,8 @@ final class EditorController: NSObject, NSTextViewDelegate {
 
         scrollView.documentView = textView
         (scrollView as? EditorScrollView)?.onUnhide = { [weak self] in self?.editorWasUnhidden() }
+        (scrollView as? EditorScrollView)?.onScrollWheel = { [weak self] in self?.hadReaderInput = true }
+        textView.onKeyDown = { [weak self] in self?.hadReaderInput = true }
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(
             self, selector: #selector(boundsDidChange(_:)),
@@ -360,12 +377,9 @@ final class EditorController: NSObject, NSTextViewDelegate {
         // scrolling; following it would jump the preview and the outline on every step.
         guard !isSettlingResize, !scrollView.inLiveResize else { return }
         onVisibleTextMove?()
-        guard !isScrollingQuietly, let document = scrollView.documentView else { return }
-        let clip = scrollView.contentView.bounds
-        let insets = scrollView.contentInsets
-        let maxY = document.frame.height + insets.top + insets.bottom - clip.height
-        let fraction = maxY > 1 ? (clip.origin.y + insets.top) / maxY : 0
-        onScroll?(min(max(fraction, 0), 1))
+        guard !isScrollingQuietly else { return }
+        onScroll?(hadReaderInput)
+        hadReaderInput = false
     }
 
     /// Records each text edit so the next highlight restyles only the edited paragraphs.
@@ -491,6 +505,13 @@ extension EditorController {
 /// The editor's scroll view, which tells the editor when a view mode shows it again.
 final class EditorScrollView: NSScrollView {
     var onUnhide: (() -> Void)?
+    /// The reader scrolled with the trackpad or mouse, momentum included.
+    var onScrollWheel: (() -> Void)?
+
+    override func scrollWheel(with event: NSEvent) {
+        onScrollWheel?()
+        super.scrollWheel(with: event)
+    }
 
     override func viewDidUnhide() {
         super.viewDidUnhide()
@@ -499,22 +520,40 @@ final class EditorScrollView: NSScrollView {
 }
 
 extension EditorController {
-    /// Scrolls so the visible area starts at `y`, kept within the document.
+    /// Selects a range and scrolls it into view only when it is not already visible, quietly.
+    func selectKeepingPlace(_ range: NSRange) {
+        let length = (textView.string as NSString).length
+        guard range.location <= length else { return }
+        let clamped = NSRange(location: range.location, length: min(range.length, length - range.location))
+        textView.setSelectedRange(clamped)
+        let visible = scrollView.contentView.bounds
+        let top = visible.minY + scrollView.contentInsets.top
+        if let line = lineFrame(at: clamped.location), line.minY >= top, line.maxY <= visible.maxY { return }
+        isScrollingQuietly = true
+        defer { isScrollingQuietly = false }
+        reveal(clamped, indicator: false, select: false)
+    }
+
+    /// Scrolls so the visible area starts at `y`, kept within the document, on a device pixel.
     func scroll(toY y: CGFloat) {
         let clip = scrollView.contentView
+        let scale = scrollView.window?.backingScaleFactor ?? 2
         let target = Self.clampedOffset(
-            y, visibleHeight: clip.bounds.height, documentHeight: textView.frame.height, topInset: scrollView.contentInsets.top
+            y, visibleHeight: clip.bounds.height, documentHeight: textView.frame.height, topInset: scrollView.contentInsets.top,
+            scale: scale
         )
-        guard abs(clip.bounds.origin.y - target) > 0.5 else { return }
+        guard abs(clip.bounds.origin.y - target) >= 1 / scale else { return }
         clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: target))
         scrollView.reflectScrolledClipView(clip)
     }
 
     /// A scroll offset kept between the top inset and the end of the document.
-    static func clampedOffset(_ y: CGFloat, visibleHeight: CGFloat, documentHeight: CGFloat, topInset: CGFloat) -> CGFloat {
+    /// `scale` is the display's pixels per point: the offset lands on a whole pixel, so a pane
+    /// that follows the other moves as finely as the screen can show.
+    static func clampedOffset(_ y: CGFloat, visibleHeight: CGFloat, documentHeight: CGFloat, topInset: CGFloat, scale: CGFloat) -> CGFloat {
         let minY = -topInset
         let maxY = max(minY, documentHeight - visibleHeight)
-        return min(max(y.rounded(), minY), maxY)
+        return min(max((y * scale).rounded() / scale, minY), maxY)
     }
 
     /// Selects a range if asked and scrolls its line to the middle of the editor.

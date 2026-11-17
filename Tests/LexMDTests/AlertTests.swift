@@ -113,12 +113,9 @@ extension TabCommandTests {
         let root = FileScanner.canonicalPath(folder.url.path)
         let mode = model.viewMode
         // Renames register undo on the window.
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
-        let previousSuperview = model.editor.scrollView.superview
-        window.contentView = model.editor.scrollView
+        let host = EditorHost(model)
         defer {
-            window.contentView = nil
-            if let previousSuperview { previousSuperview.addSubview(model.editor.scrollView) }
+            host.restore()
             model.setViewMode(mode)
         }
         model.setViewMode(.read)

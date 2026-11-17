@@ -595,6 +595,9 @@ final class WorkspaceContainer: NSView, NSSplitViewDelegate {
         mode = newMode
         editor.isHidden = newMode == .read
         preview.isHidden = newMode == .edit
+        // In Split view the panes scroll together, and the preview's scroll bar, at the window's
+        // edge, is the one shown.
+        (editor as? NSScrollView)?.hasVerticalScroller = newMode != .split
         if newMode == .split { needsEvenSplit = true }
         split.adjustSubviews()
         split.needsLayout = true
