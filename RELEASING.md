@@ -3,7 +3,9 @@
 ## Prepare
 
 Set `CFBundleShortVersionString` in `Resources/Info.plist` and always increase `CFBundleVersion`.
-Add the release notes to [CHANGELOG.md](CHANGELOG.md). Build, install, and check the app.
+Add the release notes to [CHANGELOG.md](CHANGELOG.md) under `## <version>`: the update window
+shows that section to people before they install, so keep it short and written for them.
+Build, install, and check the app.
 
 ## Package
 
@@ -12,7 +14,7 @@ Add the release notes to [CHANGELOG.md](CHANGELOG.md). Build, install, and check
 ```
 
 This writes `build/Release`: the zip Sparkle installs, a disk image for first downloads,
-`appcast.xml`, and `SHA256SUMS`. Builds are ad-hoc signed and not notarized.
+`appcast.xml` (with the version's notes from the changelog), and `SHA256SUMS`. Builds are ad-hoc signed and not notarized.
 
 ## Signing key
 
