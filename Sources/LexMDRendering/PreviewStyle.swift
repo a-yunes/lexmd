@@ -339,6 +339,46 @@ html.lexmd-differentiate mark.lexmd-hit.current { text-decoration: underline; te
   line-height: normal;
 }
 .lexmd-diagram-view > svg { display: inline-block; max-width: 100%; height: auto; vertical-align: top; }
+/* Image viewer: an image or diagram opened over the page, to zoom and move around. */
+#content img:not(a img), #content .lexmd-diagram-view { cursor: zoom-in; }
+#lexmd-lightbox {
+  position: fixed; inset: 0; z-index: 1000; display: none; overflow: hidden; outline: none;
+  -webkit-user-select: none; user-select: none;
+}
+#lexmd-lightbox.open { display: block; }
+/* The backdrop is its own layer, so opening and closing fade only its opacity; the item only
+   moves and scales (see PreviewTemplate+Lightbox.swift). */
+.lexmd-lightbox-backdrop { position: absolute; inset: 0; background: #f6f6f8; }
+@media (prefers-color-scheme: dark) { .lexmd-lightbox-backdrop { background: #161618; } }
+html.lexmd-lightbox-open, html.lexmd-lightbox-open body { overflow: hidden; }
+.lexmd-lightbox-stage { position: absolute; inset: 0; }
+.lexmd-lightbox-item { position: absolute; left: 0; top: 0; max-width: none; margin: 0; transform-origin: 0 0; cursor: zoom-in; }
+#lexmd-lightbox.lexmd-lightbox-pannable .lexmd-lightbox-item { cursor: grab; }
+#lexmd-lightbox.lexmd-lightbox-dragging .lexmd-lightbox-item { cursor: grabbing; }
+img.lexmd-lightbox-item { border-radius: 0; }
+.lexmd-lightbox-diagram.lexmd-diagram-view { padding: 0; border: none; border-radius: 0; overflow: visible; background: transparent; }
+/* The closing copy: laid out at the page's size and place; see PreviewTemplate+Lightbox.swift. */
+.lexmd-lightbox-flight { position: absolute; margin: 0; transform-origin: 0 0; pointer-events: none; will-change: transform, opacity; }
+.lexmd-lightbox-shield { width: 100%; height: 100%; will-change: transform; }
+.lexmd-lightbox-bar {
+  position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 2px; padding: 4px;
+  border-radius: 10px; background: var(--fill-strong); border: 1px solid var(--hair);
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+  font: 500 12px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.lexmd-lightbox-bar button {
+  min-width: 30px; height: 26px; padding: 0 8px; border: none; border-radius: 6px; background: transparent;
+  color: var(--text); font: inherit; cursor: default;
+}
+.lexmd-lightbox-bar button:hover { background: var(--fill-strong); }
+.lexmd-lightbox-bar button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.lexmd-lightbox-zoom { min-width: 44px; text-align: center; color: var(--secondary); font-variant-numeric: tabular-nums; }
+.lexmd-lightbox-caption {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); max-width: 70%;
+  padding: 6px 12px; border-radius: 8px; background: var(--fill-strong); color: var(--secondary);
+  font: 13px/1.35 -apple-system, BlinkMacSystemFont, sans-serif; text-align: center;
+}
+@media print { #lexmd-lightbox { display: none !important; } }
 .lexmd-render-error {
   margin: 0.45em 0 0;
   white-space: pre-wrap;

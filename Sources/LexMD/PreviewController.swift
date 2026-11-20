@@ -100,6 +100,9 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         content.addUserScript(WKUserScript(
             source: PreviewTemplate.scrollSyncScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Self.world
         ))
+        content.addUserScript(WKUserScript(
+            source: PreviewTemplate.lightboxScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Self.world
+        ))
         configuration.userContentController = content
         // Tab moves through links and buttons, such as a code block's Copy button.
         configuration.preferences.tabFocusesLinks = true
@@ -155,6 +158,7 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     }
 
     private func loadTemplate() {
+        setLightboxOpen(false)
         isScrollInFlight = false
         pendingScroll = nil
         pageLayout = nil
@@ -213,6 +217,8 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         let isNewRender = hasNewRender
         hasNewRender = false
         loadLibraries(for: lastHTML)
+        // An image opened from another document doesn't stay over this one.
+        if isLightboxOpen, lastDocument != shownDocument { closeLightbox() }
         call("lexmdRender(html, base, reset)", ["html": lastHTML, "base": base, "reset": reset])
         shownDocument = lastDocument
         shownGeneration = lastGeneration
@@ -299,6 +305,33 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         call("lexmdZoom(s)", ["s": value])
     }
 
+    // MARK: Image viewer
+
+    /// An image or diagram is open in the page's viewer (see PreviewTemplate+Lightbox.swift).
+    private(set) var isLightboxOpen = false
+
+    private func setLightboxOpen(_ open: Bool) {
+        isLightboxOpen = open
+        (webView as? PreviewWebView)?.onLightboxPinch = open ? { [weak self] magnification, point in
+            self?.call("window.lexmdLightbox.pinch(m, x, y)", ["m": Double(magnification), "x": Double(point.x), "y": Double(point.y)])
+        } : nil
+    }
+
+    /// Zooms the open viewer by `steps` (0 fits it to the window), as Make Text Bigger and
+    /// Smaller do for the page. Returns false, doing nothing, when the viewer isn't open.
+    @discardableResult
+    func zoomLightbox(by steps: Int) -> Bool {
+        guard isLightboxOpen else { return false }
+        call("window.lexmdLightbox.zoom(s)", ["s": steps])
+        return true
+    }
+
+    func closeLightbox() {
+        guard isLightboxOpen else { return }
+        call("window.lexmdLightbox.close()", [:])
+        setLightboxOpen(false)
+    }
+
     /// True once the page has loaded; renders requested before that have been sent to it.
     var isPageLoaded: Bool { isLoaded }
 
@@ -337,6 +370,10 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         if type == "copy", let text = body["text"] as? String {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
+        } else if type == "lightbox", let open = body["open"] as? Bool {
+            setLightboxOpen(open)
+            // Keys (Escape, zoom, arrows) go to the viewer, even when the editor had focus.
+            if open, let window = webView.window, window.firstResponder !== webView { window.makeFirstResponder(webView) }
         } else if type == "heading", let id = body["id"] as? String {
             onHeadingChange?(id)
         } else if type == "scroll", let fraction = body["f"] as? Double {
@@ -458,7 +495,16 @@ final class PreviewWebView: WKWebView {
         size.height < placeholderHeight && current.height >= placeholderHeight
     }
 
+    /// While an image is open in the viewer, a pinch zooms it at the fingers instead of
+    /// changing the text size.
+    var onLightboxPinch: ((CGFloat, CGPoint) -> Void)?
+
     override func magnify(with event: NSEvent) {
+        if let onLightboxPinch {
+            let point = convert(event.locationInWindow, from: nil)
+            onLightboxPinch(event.magnification, CGPoint(x: point.x, y: isFlipped ? point.y : bounds.height - point.y))
+            return
+        }
         guard let onPinch else { return super.magnify(with: event) }
         let steps = pinch.steps(adding: event.magnification, phase: event.phase)
         if steps != 0 { onPinch(steps) }
