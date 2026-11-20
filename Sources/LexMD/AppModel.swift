@@ -1113,6 +1113,8 @@ final class AppModel {
     }
 
     func zoom(by step: Int) {
+        // With an image open in the preview's viewer, the zoom commands zoom the image.
+        guard !preview.zoomLightbox(by: step) else { return }
         let steps: [Double] = [0.8, 0.9, 1, 1.1, 1.2, 1.35, 1.5, 1.7, 2]
         if step == 0 {
             fontScale = 1
