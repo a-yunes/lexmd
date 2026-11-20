@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Packages a release into build/Release: a zip and a disk image of LexMD.app, SHA256SUMS,
 # and a Sparkle appcast.xml signed with the `lexmd-updates` key from the login Keychain.
+# The feed carries the version's notes from CHANGELOG.md, which the update window shows.
 # Upload every file in build/Release to the GitHub release tagged v<version>.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -14,6 +15,8 @@ TOOLS=.build/artifacts/sparkle/Sparkle/bin
 APP=build/LexMD.app
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")
 BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Contents/Info.plist")
+# Before anything is built: a release without notes in CHANGELOG.md stops here.
+NOTES=$(./scripts/release-notes.sh "$VERSION")
 OUT=build/Release
 rm -rf "$OUT" && mkdir -p "$OUT"
 # On failure, remove the temporary folders and the incomplete release, so nothing partial is
@@ -50,7 +53,9 @@ STAGE=
 # Sparkle installs from the zip; the disk image is for first-time downloads.
 FEED_DIR=$(mktemp -d build/feed.XXXXXX)
 cp "$OUT/$ZIP" "$FEED_DIR/"
-TZ=UTC "$TOOLS/generate_appcast" --account "$KEY_ACCOUNT" --maximum-deltas 0 \
+# Notes named after the archive are embedded in its feed item.
+printf '%s\n' "$NOTES" > "$FEED_DIR/${ZIP%.zip}.html"
+TZ=UTC "$TOOLS/generate_appcast" --account "$KEY_ACCOUNT" --maximum-deltas 0 --embed-release-notes \
   --download-url-prefix "https://github.com/$REPO/releases/download/v$VERSION/" \
   --link "https://github.com/$REPO" "$FEED_DIR"
 cp "$FEED_DIR/appcast.xml" "$OUT/appcast.xml"

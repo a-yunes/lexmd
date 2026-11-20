@@ -21,3 +21,7 @@ keystroke away. Built with SwiftUI and AppKit as a Swift package. Keep documenta
 - No accounts, analytics, or network use beyond user-enabled update checks.
 - Never commit personal paths, private notes, credentials, or signing keys.
 - Build and run the app for every change and report what was not verified.
+- Keep `CHANGELOG.md` brief and to the point. The update window shows each version's section to
+  people before they install, so write it for them: a few short items, one line each where
+  possible, saying what changed for the reader. Leave out implementation detail, and merge or
+  drop minor fixes rather than listing them all.
