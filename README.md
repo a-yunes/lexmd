@@ -14,6 +14,7 @@ No account, subscription, or analytics. Your files stay where they are.
   Documents never run scripts, and images hosted online load only if you allow them.
 - Update in place: switch to the editor or keep it side by side. Changes save as you type.
 - Diagrams (Mermaid syntax, rendered by Pele), math, footnotes, and front matter as properties.
+- Click an image or diagram to open it in a viewer you can zoom and move around in.
 - Outline, backlinks, wiki links, link suggestions, and broken-link checks.
 - Tabs, plus creating, renaming, and moving files with links updated for you.
 - Export to PDF or HTML, print, or copy as rich text.

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.0
+
+- Click an image or a diagram in the preview to open it in a viewer that fills the preview.
+  It grows from its place in the document and returns there when you close it.
+- In the viewer, zoom by pinching, with Make Text Bigger and Smaller (⌘+ and ⌘−), with the
+  buttons, or by double-clicking. Drag, scroll or use the arrow keys to move around. Fit shows
+  it whole, and 1:1 shows an image at its own pixels. 100% is the size it has in the document.
+- Escape, the close button, or a click beside it closes the viewer.
+- Double-clicking an image or diagram still edits it, and an image that is a link still follows
+  the link.
+
 ## 1.1.4
 
 - In Split view the editor and the preview scroll together, whichever one you scroll. Both show
